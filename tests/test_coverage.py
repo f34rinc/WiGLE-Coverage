@@ -49,7 +49,7 @@ class TestCoverage(unittest.TestCase):
 class TestRecommend(unittest.TestCase):
     def test_hole_fully_surrounded(self):
         cov = {(dr, dc): 5 for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0)}
-        recs = wc.recommend(cov, min_obs=2, margin=1, hole_threshold=5)
+        recs = wc.recommend(cov, min_obs=2, hole_threshold=5)
         by_cell = {r["cell"]: r for r in recs}
         self.assertIn((0, 0), by_cell)
         self.assertEqual(by_cell[(0, 0)]["label"], "hole")
@@ -57,19 +57,20 @@ class TestRecommend(unittest.TestCase):
 
     def test_edge_not_hole_and_covered_excluded(self):
         cov = {(0, 0): 5}
-        recs = wc.recommend(cov, min_obs=2, margin=1, hole_threshold=5)
+        recs = wc.recommend(cov, min_obs=2, hole_threshold=5)
         labels = {r["label"] for r in recs}
         self.assertIn("edge", labels)
         self.assertNotIn("hole", labels)
         self.assertNotIn((0, 0), {r["cell"] for r in recs})   # covered cell isn't recommended
+        self.assertEqual(len(recs), 8)                        # exactly its 8 blank neighbours
 
     def test_holes_rank_before_edges(self):
         cov = {(dr, dc): 5 for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0)}
-        recs = wc.recommend(cov, min_obs=2, margin=2, hole_threshold=5)
+        recs = wc.recommend(cov, min_obs=2, hole_threshold=5)
         self.assertTrue(recs and recs[0]["label"] == "hole")   # the surrounded hole sorts first
 
     def test_no_coverage_no_recs(self):
-        self.assertEqual(wc.recommend({(0, 0): 1}, min_obs=2, margin=1, hole_threshold=5), [])
+        self.assertEqual(wc.recommend({(0, 0): 1}, min_obs=2, hole_threshold=5), [])
 
 
 if __name__ == "__main__":

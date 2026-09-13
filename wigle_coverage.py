@@ -13,7 +13,7 @@ spot; a single run-KML just maps that one run.
 
 CLI:
     python wigle_coverage.py "<dir or file(s)>" [--cell-size 200] [--min-obs 2]
-                             [--margin 2] [--out map.html] [--no-open]
+                             [--hole-threshold 5] [--out map.html] [--no-open]
 
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
 git-ignored. Nothing here is uploaded or published.
@@ -33,7 +33,6 @@ import webbrowser
 # ---- config defaults --------------------------------------------------------
 CELL_SIZE_M   = 200     # grid cell edge in metres
 MIN_OBS       = 2       # APs in a cell before it counts as "covered" (filters strays)
-MARGIN        = 2       # cells to look beyond your footprint when recommending
 HOLE_THRESHOLD = 5      # covered 8-neighbours at/above this => "hole", else "edge"
 EARTH_M_PER_DEG = 111320.0
 # -----------------------------------------------------------------------------
@@ -70,27 +69,26 @@ def covered_cells(coverage, min_obs):
 _NEIGHBORS = [(dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0)]
 
 
-def recommend(coverage, min_obs, margin, hole_threshold):
-    """Blank cells worth walking next. Within the covered footprint's bounding box
-    (+margin), every uncovered cell that touches coverage is returned, labelled
-    'hole' (surrounded - a skipped street) or 'edge' (the expanding frontier),
-    ranked holes-first then by how many covered neighbours it has."""
+def recommend(coverage, min_obs, hole_threshold):
+    """Blank cells worth walking next: the uncovered 8-neighbours of your covered
+    cells, labelled 'hole' (surrounded - a skipped street) or 'edge' (the expanding
+    frontier), ranked holes-first then by covered-neighbour count. Scans only cells
+    adjacent to coverage - O(covered), not O(bounding box) - so it stays fast even
+    when coverage is spread across a whole metro."""
     covered = covered_cells(coverage, min_obs)
     if not covered:
         return []
-    rows = [r for r, _ in covered]
-    cols = [c for _, c in covered]
-    r0, r1 = min(rows) - margin, max(rows) + margin
-    c0, c1 = min(cols) - margin, max(cols) + margin
+    candidates = set()
+    for (r, c) in covered:
+        for dr, dc in _NEIGHBORS:
+            nb = (r + dr, c + dc)
+            if nb not in covered:
+                candidates.add(nb)
     recs = []
-    for r in range(r0, r1 + 1):
-        for c in range(c0, c1 + 1):
-            if (r, c) in covered:
-                continue
-            n = sum(((r + dr, c + dc) in covered) for dr, dc in _NEIGHBORS)
-            if n >= 1:
-                recs.append({"cell": (r, c), "label": "hole" if n >= hole_threshold else "edge",
-                             "covered_neighbors": n})
+    for (r, c) in candidates:
+        n = sum(((r + dr, c + dc) in covered) for dr, dc in _NEIGHBORS)
+        recs.append({"cell": (r, c), "label": "hole" if n >= hole_threshold else "edge",
+                     "covered_neighbors": n})
     recs.sort(key=lambda x: (x["label"] != "hole", -x["covered_neighbors"]))
     return recs
 
@@ -303,8 +301,6 @@ def parse_args():
                    help=f"grid cell edge in metres (default {CELL_SIZE_M})")
     p.add_argument("--min-obs", type=int, default=MIN_OBS,
                    help=f"networks in a cell before it counts as covered (default {MIN_OBS})")
-    p.add_argument("--margin", type=int, default=MARGIN,
-                   help=f"cells to scan beyond your footprint (default {MARGIN})")
     p.add_argument("--hole-threshold", type=int, default=HOLE_THRESHOLD,
                    help=f"covered neighbours for a 'hole' vs 'edge' (default {HOLE_THRESHOLD})")
     p.add_argument("--out", help="output HTML path (default: beside the first input)")
@@ -319,22 +315,32 @@ def run(args):
               "script, or pass paths on the command line.")
         return None
     print(f"reading {len(files)} file(s)...")
-    points = []
+    raw = []
     for f in files:
-        n0 = len(points)
-        points.extend(parse_any(f))
-        print(f"  {os.path.basename(f)}: {len(points) - n0} points")
+        n0 = len(raw)
+        raw.extend(parse_any(f))
+        print(f"  {os.path.basename(f)}: {len(raw) - n0:,} points")
+    # Drop invalid / null-island coordinates - a single (0,0) or out-of-range fix
+    # would otherwise stretch the map extent from Rio to the Atlantic.
+    points = [(la, lo) for (la, lo) in raw
+              if -90 <= la <= 90 and -180 <= lo <= 180 and not (la == 0 and lo == 0)]
+    dropped = len(raw) - len(points)
+    if dropped:
+        print(f"  dropped {dropped:,} invalid/zero coordinates")
     if not points:
-        print("No coordinates found in those files.")
+        print("No usable coordinates found in those files.")
         return None
 
     mean_lat = sum(p[0] for p in points) / len(points)
     dlat, dlon = meters_to_deg(args.cell_size, mean_lat)
+    print(f"gridding {len(points):,} points into ~{args.cell_size:.0f} m cells...")
     coverage = build_coverage(points, dlat, dlon)
     covered = covered_cells(coverage, args.min_obs)
-    recs = recommend(coverage, args.min_obs, args.margin, args.hole_threshold)
+    print(f"  {len(covered):,} covered cells; finding recommendations...")
+    recs = recommend(coverage, args.min_obs, args.hole_threshold)
     holes = sum(1 for r in recs if r["label"] == "hole")
     edges = len(recs) - holes
+    print(f"  {holes:,} holes + {edges:,} edges; rendering map...")
 
     out = args.out or os.path.join(
         os.path.dirname(os.path.abspath(files[0])),

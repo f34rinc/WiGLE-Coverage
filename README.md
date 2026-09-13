@@ -27,7 +27,6 @@ python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 200 --min-obs 2 --o
 |---|--:|---|
 | `--cell-size` | 200 | grid cell edge, metres |
 | `--min-obs` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
-| `--margin` | 2 | cells to scan beyond your footprint when recommending |
 | `--hole-threshold` | 5 | covered neighbours (of 8) for a cell to rank as a "hole" vs an "edge" |
 | `--out` | *beside first input* | output HTML path |
 | `--no-open` | off | don't auto-open the map |
