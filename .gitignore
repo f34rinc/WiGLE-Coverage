@@ -1,0 +1,23 @@
+# GPS-bearing inputs and generated maps carry real coordinates - NEVER commit,
+# even in a private repo (in case it ever flips public or leaks).
+*.kml
+*.kmz
+*.csv
+*.html
+*.sqlite
+*.db
+data/
+out/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
