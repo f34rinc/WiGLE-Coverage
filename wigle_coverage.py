@@ -12,7 +12,7 @@ dragging the whole "WiGLE data" folder (or selecting all the KMLs) is the sweet
 spot; a single run-KML just maps that one run.
 
 CLI:
-    python wigle_coverage.py "<dir or file(s)>" [--cell-size 200] [--min-obs 2]
+    python wigle_coverage.py "<dir or file(s)>" [--cell-size 100] [--min-obs 2]
                              [--hole-threshold 5] [--out map.html] [--no-open]
 
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
@@ -31,7 +31,7 @@ import datetime
 import webbrowser
 
 # ---- config defaults --------------------------------------------------------
-CELL_SIZE_M   = 200     # grid cell edge in metres
+CELL_SIZE_M   = 100     # grid cell edge in metres (~one city block)
 MIN_OBS       = 2       # APs in a cell before it counts as "covered" (filters strays)
 HOLE_THRESHOLD = 5      # covered 8-neighbours at/above this => "hole", else "edge"
 EARTH_M_PER_DEG = 111320.0
@@ -191,16 +191,16 @@ _HTML = """<!doctype html>
 <script>
 const D = __DATA__;
 const map = L.map('map');
-// OSM's own tile servers block file:// / policy-violating requests, so default to
-// keyless, local-file-friendly basemaps (CARTO) with a couple of alternates.
-const baseLight = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-  {maxZoom:20, subdomains:'abcd', attribution:'&copy; OpenStreetMap contributors &copy; CARTO'});
-const baseDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-  {maxZoom:20, subdomains:'abcd', attribution:'&copy; OpenStreetMap contributors &copy; CARTO'});
-const baseEsri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+// OSM's own servers block file:// requests and CARTO now nags without an API key,
+// so use Esri's keyless, nag-free basemaps (fine from a local file).
+const baseStreet = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
   {maxZoom:19, attribution:'Tiles &copy; Esri'});
-baseLight.addTo(map);
-L.control.layers({'Carto Light': baseLight, 'Carto Dark': baseDark, 'Esri Street': baseEsri},
+const baseGray = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+  {maxZoom:16, attribution:'Tiles &copy; Esri'});
+const baseSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  {maxZoom:19, attribution:'Tiles &copy; Esri, Maxar, Earthstar Geographics'});
+baseStreet.addTo(map);
+L.control.layers({'Streets (Esri)': baseStreet, 'Light gray': baseGray, 'Satellite': baseSat},
   null, {position:'topright'}).addTo(map);
 
 function bounds(r,c){ return [[r*D.dlat, c*D.dlon], [(r+1)*D.dlat, (c+1)*D.dlon]]; }
