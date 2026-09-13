@@ -18,7 +18,7 @@ CLI:
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
 git-ignored. Nothing here is uploaded or published.
 
-stdlib only. Leaflet + OpenStreetMap tiles load in your browser at view time.
+stdlib only. Leaflet + CARTO/Esri basemap tiles load in your browser at view time.
 """
 import os
 import re
@@ -191,8 +191,17 @@ _HTML = """<!doctype html>
 <script>
 const D = __DATA__;
 const map = L.map('map');
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+// OSM's own tile servers block file:// / policy-violating requests, so default to
+// keyless, local-file-friendly basemaps (CARTO) with a couple of alternates.
+const baseLight = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+  {maxZoom:20, subdomains:'abcd', attribution:'&copy; OpenStreetMap contributors &copy; CARTO'});
+const baseDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+  {maxZoom:20, subdomains:'abcd', attribution:'&copy; OpenStreetMap contributors &copy; CARTO'});
+const baseEsri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+  {maxZoom:19, attribution:'Tiles &copy; Esri'});
+baseLight.addTo(map);
+L.control.layers({'Carto Light': baseLight, 'Carto Dark': baseDark, 'Esri Street': baseEsri},
+  null, {position:'topright'}).addTo(map);
 
 function bounds(r,c){ return [[r*D.dlat, c*D.dlon], [(r+1)*D.dlat, (c+1)*D.dlon]]; }
 function covColor(n){ return n>=30?'#0b525b':n>=10?'#1c7c8c':n>=3?'#5aa7a7':'#a9d6d6'; }
