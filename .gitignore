@@ -9,6 +9,9 @@
 data/
 out/
 
+# your personal map API key - never commit (map_key.txt.example is the template)
+map_key.txt
+
 # Python
 __pycache__/
 *.py[cod]

@@ -60,6 +60,24 @@ EARTH_M_PER_DEG = 111320.0
 # (git-ignored). Drop your KML/CSV + .sqlite backup here and just run the tool.
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
+# Optional map API key: a git-ignored map_key.txt beside this script. When present it
+# unlocks the keyed OSM (Stadia) basemap in the map's layer switcher; when absent that
+# option simply isn't offered. Your own key, never committed - see map_key.txt.example.
+MAP_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "map_key.txt")
+
+
+def read_map_key():
+    """The API key from map_key.txt (first non-comment, non-blank line), or None."""
+    try:
+        with open(MAP_KEY_FILE, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return line
+    except OSError:
+        pass
+    return None
+
 
 # ---- console colour (cross-platform; degrades to plain text) -----------------
 class _C:
@@ -356,6 +374,16 @@ baseStreet.addTo(map);
 const layerCtl = L.control.layers({'Streets (Esri)': baseStreet, 'Light gray': baseGray,
                   'Satellite': baseSat, 'Satellite + labels': baseHybrid},
   null, {position:'topright'}).addTo(map);
+// keyed OSM basemap (Stadia Alidade Smooth) - only offered when a map key is present
+if (D.mapKey){
+  const osm = L.tileLayer(
+    'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}.png?api_key='+encodeURIComponent(D.mapKey),
+    {maxZoom:20, attribution:'&copy; <a href="https://stadiamaps.com/" target="_blank">Stadia Maps</a>'
+      +' &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a>'
+      +' &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'});
+  layerCtl.addBaseLayer(osm, 'OSM smooth (Stadia)');
+  osm.addTo(map); map.removeLayer(baseStreet);   // default to it when a key is set
+}
 
 function bounds(r,c){ return [[r*D.dlat, c*D.dlon], [(r+1)*D.dlat, (c+1)*D.dlon]]; }
 function covColor(n){ return n>=30?'#0b525b':n>=10?'#1c7c8c':n>=3?'#5aa7a7':'#a9d6d6'; }
@@ -423,7 +451,7 @@ lg.addTo(map);
 </script></body></html>"""
 
 
-def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=None):
+def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=None, map_key=None):
     covered = covered_cells(coverage, min_obs)
     cov_list = [[r, c, coverage[(r, c)]] for (r, c) in covered]
     rec_list = [[x["cell"][0], x["cell"][1], x["label"], x["covered_neighbors"]] for x in recs]
@@ -433,7 +461,7 @@ def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=No
     fit = [[min(rows) * dlat, min(cols) * dlon],
            [(max(rows) + 1) * dlat, (max(cols) + 1) * dlon]]
     data = {"dlat": dlat, "dlon": dlon, "covered": cov_list, "recs": rec_list,
-            "fit": fit, "track": track_segments or []}
+            "fit": fit, "track": track_segments or [], "mapKey": map_key or ""}
     title = "WiGLE coverage &amp; frontier"
     html = _HTML.replace("__DATA__", json.dumps(data)).replace("__TITLE__", title)
     with open(out_path, "w", encoding="utf-8") as fh:
@@ -660,7 +688,8 @@ def run(args):
 
     out = args.out or os.path.join(
         base_dir or os.getcwd(), f"wigle_coverage{tag}_{datetime.date.today():%Y%m%d}.html")
-    render_html(coverage, recs, dlat, dlon, args.min_obs, out, track_segments=track_segs)
+    render_html(coverage, recs, dlat, dlon, args.min_obs, out,
+                track_segments=track_segs, map_key=read_map_key())
 
     print(_rule("="))
     print(f"  {len(points):,} points  ->  {C.b}{len(covered):,}{C.reset} covered cells (~{args.cell_size:.0f} m)")

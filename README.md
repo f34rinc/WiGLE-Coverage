@@ -119,6 +119,18 @@ tiles don't carry those). The top-right switcher offers Streets, Light gray,
 Satellite, and **Satellite + labels** — the last is handy for orienting among
 look-alike highrise blocks.
 
+### Optional: a nicer OSM basemap (bring your own key)
+
+The keyless Esri basemaps work out of the box. If you want a clean OSM-based
+"Alidade Smooth" style too, drop your **own** free API key into a `map_key.txt`:
+
+1. Grab a free key at <https://client.stadiamaps.com/> (email, no card).
+2. Copy `map_key.txt.example` → `map_key.txt` and paste your key on a line.
+
+An **"OSM smooth (Stadia)"** option then appears in the layer switcher (and becomes the
+default). **No key → the option simply isn't shown.** `map_key.txt` is git-ignored — it's
+*your* key, never committed; you don't use anyone else's, and no one uses yours.
+
 ## Privacy
 
 Your WiGLE exports and the generated map carry **real GPS coordinates**. They stay

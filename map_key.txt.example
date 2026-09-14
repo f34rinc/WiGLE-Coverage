@@ -1,0 +1,15 @@
+# --- OPTIONAL map API key -----------------------------------------------------
+# Paste your OWN Stadia Maps API key below (on a line by itself) to unlock the
+# "OSM smooth (Stadia)" basemap in the generated map's layer switcher.
+#
+# 1. Get a FREE key at https://client.stadiamaps.com/  (email signup, no card).
+# 2. Copy this file to  map_key.txt   (that name is git-ignored - your key stays local).
+# 3. Put your key on the line below and save.
+#
+# With no key present, the tool just uses its keyless Esri basemaps and the OSM
+# option isn't shown. Lines starting with # are ignored.
+#
+# NOTE: the key gets embedded in the generated (local, git-ignored) .html so the
+# browser can fetch tiles - fine locally; don't share that .html publicly.
+
+YOUR-STADIA-API-KEY-HERE
