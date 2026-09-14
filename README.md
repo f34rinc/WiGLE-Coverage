@@ -20,12 +20,12 @@ the map, and opens it in your browser.
 **Command line:**
 
 ```
-python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 75 --min-obs 2 --out map.html
+python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 50 --min-obs 2 --out map.html
 ```
 
 | flag | default | meaning |
 |---|--:|---|
-| `--cell-size` | 75 | grid cell edge, metres (~most of a block; try 50/100 to taste) |
+| `--cell-size` | 50 | grid cell edge, metres (~half a block; below ~25 m just maps GPS scatter) |
 | `--min-obs` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
 | `--hole-threshold` | 5 | covered neighbours (of 8) for a cell to rank as a "hole" vs an "edge" |
 | `--out` | *beside first input* | output HTML path |

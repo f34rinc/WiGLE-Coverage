@@ -12,7 +12,7 @@ dragging the whole "WiGLE data" folder (or selecting all the KMLs) is the sweet
 spot; a single run-KML just maps that one run.
 
 CLI:
-    python wigle_coverage.py "<dir or file(s)>" [--cell-size 75] [--min-obs 2]
+    python wigle_coverage.py "<dir or file(s)>" [--cell-size 50] [--min-obs 2]
                              [--hole-threshold 5] [--out map.html] [--no-open]
 
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
@@ -31,7 +31,7 @@ import datetime
 import webbrowser
 
 # ---- config defaults --------------------------------------------------------
-CELL_SIZE_M   = 75      # grid cell edge in metres (~most of a city block)
+CELL_SIZE_M   = 50      # grid cell edge in metres (~half a block; near the GPS floor)
 MIN_OBS       = 2       # APs in a cell before it counts as "covered" (filters strays)
 HOLE_THRESHOLD = 5      # covered 8-neighbours at/above this => "hole", else "edge"
 EARTH_M_PER_DEG = 111320.0
@@ -317,7 +317,8 @@ def parse_args():
     p.add_argument("paths", nargs="*",
                    help="KML/CSV file(s), a folder, or globs (drag-drop friendly)")
     p.add_argument("--cell-size", type=float, default=CELL_SIZE_M,
-                   help=f"grid cell edge in metres (default {CELL_SIZE_M})")
+                   help=f"grid cell edge in metres (default {CELL_SIZE_M}; below ~25 m "
+                        "mostly maps GPS scatter, not real gaps)")
     p.add_argument("--min-obs", type=int, default=MIN_OBS,
                    help=f"networks in a cell before it counts as covered (default {MIN_OBS})")
     p.add_argument("--hole-threshold", type=int, default=HOLE_THRESHOLD,
