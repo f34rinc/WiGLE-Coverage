@@ -42,9 +42,13 @@ coverage **and** path **and** run-slicing from that one file.
 1. Open the **WiGLE WiFi Wardriving** app.
 2. Go to the **Data** tab (where the KML/CSV export buttons are).
 3. Tap **"Backup DB"** / **"Database Backup"** (button labels vary a little by version).
-4. It writes a `.sqlite` file to the phone — usually the `wiglewifi` folder, often timestamped
-   (e.g. `WiGLE Database Backup 091426_01.sqlite`).
-5. Copy that file to your PC and drop it in this tool's `data/` folder.
+4. It writes a SQLite file to the phone — usually the `wiglewifi` folder. It often has
+   **no file extension** (just `WiGLE Database Backup`), sometimes timestamped.
+5. Copy that file to your PC and drop it in this tool's `data/` folder — **as-is**.
+
+> **No need to add a `.sqlite` extension.** The tool detects a WiGLE backup by its
+> contents (the `SQLite format 3` signature), not its name, so the raw export works
+> whether you pass it directly, put it in `data/`, or point `--track` at it.
 
 > It's a **point-in-time snapshot** and **per-phone** — take a fresh backup for your latest
 > walks, and back up each phone separately if more than one person collects.
