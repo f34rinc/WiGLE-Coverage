@@ -123,6 +123,39 @@ class TestPOIs(unittest.TestCase):
         self.assertNotIn(other, got)                            # non-hole POI dropped
 
 
+class TestCapPois(unittest.TestCase):
+    def _recs(self, cells):
+        return [{"cell": list(c), "label": "hole", "covered_neighbors": 8} for c in cells]
+
+    def _mk(self, n, tag):
+        return [(f"{tag}{i}", "shop", 0.0, 0.0) for i in range(n)]
+
+    def test_no_caps_keeps_everything(self):
+        cells = [(0, 0), (0, 1)]
+        pbh = {(0, 0): self._mk(5, "a"), (0, 1): self._mk(2, "b")}
+        capped, more = wc.cap_pois(pbh, self._recs(cells), per_hole=0, total=0)
+        self.assertEqual(len(capped[(0, 0)]), 5)
+        self.assertEqual(len(capped[(0, 1)]), 2)
+        self.assertEqual(more, {})
+
+    def test_per_hole_cap_trims_and_reports_more(self):
+        pbh = {(0, 0): self._mk(5, "a"), (0, 1): self._mk(2, "b")}
+        capped, more = wc.cap_pois(pbh, self._recs([(0, 0), (0, 1)]), per_hole=2, total=0)
+        self.assertEqual(len(capped[(0, 0)]), 2)
+        self.assertEqual(more[(0, 0)], 3)          # 5 -> 2, so 3 hidden
+        self.assertEqual(len(capped[(0, 1)]), 2)
+        self.assertNotIn((0, 1), more)             # nothing trimmed off the 2-item hole
+
+    def test_total_cap_drops_whole_sparse_holes_richest_first(self):
+        # sizes 5, 3, 2; per-hole cap off; total budget 3 -> keep richest holes whole until >=3
+        pbh = {(0, 0): self._mk(5, "a"), (0, 1): self._mk(3, "b"), (0, 2): self._mk(2, "c")}
+        capped, more = wc.cap_pois(pbh, self._recs([(0, 0), (0, 1), (0, 2)]), per_hole=0, total=3)
+        self.assertIn((0, 0), capped)              # richest kept whole (running 5 -> >=3, stop after)
+        self.assertNotIn((0, 1), capped)           # budget already reached, dropped whole
+        self.assertNotIn((0, 2), capped)
+        self.assertEqual(len(capped[(0, 0)]), 5)
+
+
 class TestTargetsHtml(unittest.TestCase):
     def _dlatlon(self):
         return wc.meters_to_deg(50, LAT)

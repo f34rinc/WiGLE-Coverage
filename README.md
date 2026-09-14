@@ -131,14 +131,14 @@ An **"OSM smooth (Stadia)"** option then appears in the layer switcher (and beco
 default). **No key → the option simply isn't shown.** `map_key.txt` is git-ignored — it's
 *your* key, never committed; you don't use anyone else's, and no one uses yours.
 
-### Target the holes: name the businesses (`--pois`)
+### Target the holes: name the businesses (POIs)
 
-Add `--pois` (or toggle `pois` in the menu) and the tool asks **OpenStreetMap** (via the
-Overpass API) what named businesses sit inside each *hole* — turning "empty cell here"
-into a concrete hit-list for your next run:
+**On by default:** every run asks **OpenStreetMap** (via the Overpass API) what named
+businesses sit inside each *hole* — turning "empty cell here" into a concrete hit-list for
+your next run. Pass **`--no-pois`** to skip the lookup (or toggle `pois` in the menu).
 
 ```
-python wigle_coverage.py --pois
+python wigle_coverage.py
 #   > HOLE @ -22.970, -43.180  (4 targets): Padaria São José · Bar do Zé · Mercado · Farmácia
 ```
 
@@ -152,9 +152,17 @@ You get the same list **four ways**, so you can plan at the desk and work off it
   link). The panel links straight to it, or open it on your phone. No network needed once saved;
 - in a plain **`*_targets.txt`** (hole coordinate + OSM link + each place) for grepping/scripting.
 
-It's **one polite Overpass query** per run (opt-in, off by default), and POIs are © OpenStreetMap
-contributors (ODbL). OSM POI coverage varies by region — dense in much of Europe/North America,
-thinner elsewhere — so treat it as a "known targets" list, not an exhaustive one.
+**Kept manageable.** The list is trimmed so it stays useful, not overwhelming:
+
+| flag | default | meaning |
+|---|--:|---|
+| `--max-pois-per-hole` | 10 | most businesses shown per hole; extras collapse to a **"+N more"** note |
+| `--max-pois` | 100 | total across all holes — keeps the **richest holes whole**, drops the sparsest past the budget |
+
+Set either to `0` to lift that cap. It's **one polite Overpass query** per run, and POIs are
+© OpenStreetMap contributors (ODbL). OSM POI coverage varies by region — dense in much of
+Europe/North America, thinner elsewhere — so treat it as a "known targets" list, not an
+exhaustive one.
 
 ## Privacy
 

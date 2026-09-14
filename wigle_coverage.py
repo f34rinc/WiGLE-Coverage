@@ -33,11 +33,13 @@ HISTORICAL RUNS (SQLite only, since a KML has no timestamps):
     --date 2026-09-13          map just that local date
     (with only --track and no run flag: the ENTIRE-DB view - all your history at once)
 
-TARGETS (--pois): name the businesses inside each 'hole' via OpenStreetMap (Overpass)
-so you get a hit-list of specific places to aim a future run at. They show up four ways:
-in the hole popups; in an in-map "Targets" panel (click a row to fly to that hole); in a
-standalone, printable <map>_targets.html field sheet (linked from that panel); and in a
-plain <map>_targets.txt. OSM POI coverage varies by region.
+TARGETS (on by default; --no-pois to skip): name the businesses inside each 'hole' via
+OpenStreetMap (Overpass) so you get a hit-list of specific places to aim a future run at.
+They show up four ways: in the hole popups; in an in-map "Targets" panel (click a row to
+fly to that hole); in a standalone, printable <map>_targets.html field sheet (linked from
+that panel); and in a plain <map>_targets.txt. The list is trimmed for usefulness -
+--max-pois-per-hole (default 10) and --max-pois (default 100, richest holes first); extras
+show as "+N more". OSM POI coverage varies by region.
 
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
 git-ignored. Nothing here is uploaded or published.
@@ -63,9 +65,11 @@ TRACK_GAP_MIN  = 5      # minutes; a larger gap between fixes starts a new track
 TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one (jitter)
 RUN_GAP_MIN    = 30     # minutes of quiet that separates one run/session from the next
 EARTH_M_PER_DEG = 111320.0
-# Overpass (OpenStreetMap) - names businesses/POIs inside the "hole" cells (--pois)
+# Overpass (OpenStreetMap) - names businesses/POIs inside the "hole" cells (on by default)
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 POI_KEYS = ("shop", "amenity", "office", "tourism", "leisure", "craft")
+MAX_POIS_PER_HOLE = 10   # businesses shown per hole (0 = no cap); extras become "+N more"
+MAX_POIS_TOTAL    = 100  # total businesses across all holes, richest holes first (0 = no cap)
 # Default folder read when no path/--track is given: a "data" folder beside this script
 # (git-ignored). Drop your KML/CSV + .sqlite backup here and just run the tool.
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
@@ -381,10 +385,36 @@ def assign_pois_to_holes(pois, hole_cells, dlat, dlon):
     return out
 
 
-def _targets_for_holes(recs, poi_by_hole, dlat, dlon):
+def cap_pois(poi_by_hole, recs, per_hole=0, total=0):
+    """Trim the POI set for display, keeping the highest-value targets:
+      1. each hole is trimmed to at most `per_hole` businesses (0 = no per-hole cap),
+      2. then whole holes are kept richest-first until `total` businesses are included
+         (0 = no total cap) - remaining, sparser holes are dropped entirely.
+    Returns (capped_poi_by_hole, more_by_hole) where more_by_hole[cell] is how many extra
+    businesses that hole has beyond the ones shown (for a "+N more" note). Holes keep their
+    names sorted so the trim is deterministic."""
+    holes = [tuple(r["cell"]) for r in recs
+             if r["label"] == "hole" and poi_by_hole.get(tuple(r["cell"]))]
+    holes.sort(key=lambda c: -len(poi_by_hole[c]))          # richest holes first
+    capped, more, running = {}, {}, 0
+    for cell in holes:
+        if total and running >= total:                     # budget spent -> drop the rest
+            break
+        ps = sorted(poi_by_hole[cell], key=lambda p: p[0].lower())
+        shown = ps[:per_hole] if per_hole else ps
+        capped[cell] = shown
+        if len(ps) > len(shown):
+            more[cell] = len(ps) - len(shown)
+        running += len(shown)
+    return capped, more
+
+
+def _targets_for_holes(recs, poi_by_hole, dlat, dlon, more_by_hole=None):
     """Holes that actually have named POIs, most-loaded first (the shared source of
     truth for the .txt list, the HTML doc, and the in-map panel). Yields tuples of
-    (center_lat, center_lon, [pois sorted by name])."""
+    (center_lat, center_lon, [pois sorted by name], more) where `more` is the count of
+    additional businesses trimmed off this hole by the caps (0 if none)."""
+    more_by_hole = more_by_hole or {}
     out = []
     for r in recs:
         if r["label"] != "hole":
@@ -394,8 +424,8 @@ def _targets_for_holes(recs, poi_by_hole, dlat, dlon):
         if not ps:
             continue
         latc, lonc = (cell[0] + 0.5) * dlat, (cell[1] + 0.5) * dlon
-        out.append((latc, lonc, sorted(ps, key=lambda p: p[0].lower())))
-    out.sort(key=lambda t: -len(t[2]))
+        out.append((latc, lonc, sorted(ps, key=lambda p: p[0].lower()), more_by_hole.get(cell, 0)))
+    out.sort(key=lambda t: (-len(t[2]), -t[3]))
     return out
 
 
@@ -404,20 +434,22 @@ def _osm_link(latc, lonc):
             f"#map=18/{latc:.5f}/{lonc:.5f}")
 
 
-def write_targets(path, recs, poi_by_hole, dlat, dlon):
+def write_targets(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None):
     """Write a field target list: each hole with named businesses, most-loaded first."""
-    holes = _targets_for_holes(recs, poi_by_hole, dlat, dlon)
+    holes = _targets_for_holes(recs, poi_by_hole, dlat, dlon, more_by_hole)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("# wigle-coverage targets - named businesses inside your coverage 'holes'\n")
         fh.write(f"# {datetime.date.today():%Y-%m-%d} | POIs (c) OpenStreetMap contributors (ODbL)\n\n")
         if not holes:
             fh.write("(no named POIs found in any hole)\n")
             return
-        for latc, lonc, ps in holes:
+        for latc, lonc, ps, more in holes:
             fh.write(f"HOLE {latc:.5f}, {lonc:.5f}  ({len(ps)} target(s))\n")
             fh.write(f"  {_osm_link(latc, lonc)}\n")
             for name, cat, la, lo in ps:
                 fh.write(f"    - {name}  [{cat}]  ({la:.5f}, {lo:.5f})\n")
+            if more:
+                fh.write(f"    ... (+{more} more not shown)\n")
             fh.write("\n")
 
 
@@ -460,6 +492,7 @@ _TARGETS_DOC = """<!doctype html>
   .name{font-weight:500}
   .cat{margin-left:auto;color:var(--muted);font-size:.78rem;background:var(--chip);
        border-radius:5px;padding:1px 7px;white-space:nowrap}
+  li.more{color:var(--muted);font-size:.8rem;font-style:italic;padding:3px 2px}
   .empty{color:var(--muted);background:var(--card);border:1px dashed var(--line);
          border-radius:9px;padding:24px;text-align:center}
   footer{color:var(--muted);font-size:.8rem;margin-top:26px;border-top:1px solid var(--line);padding-top:10px}
@@ -482,19 +515,21 @@ __CARDS__
 </div></body></html>"""
 
 
-def render_targets_html(path, recs, poi_by_hole, dlat, dlon):
+def render_targets_html(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None):
     """Write a standalone, offline, print-friendly hit-list of the businesses inside
     your coverage holes - a field sheet you can open on a phone (no network needed)."""
-    holes = _targets_for_holes(recs, poi_by_hole, dlat, dlon)
-    total = sum(len(ps) for _, _, ps in holes)
+    holes = _targets_for_holes(recs, poi_by_hole, dlat, dlon, more_by_hole)
+    total = sum(len(ps) for _, _, ps, _ in holes)
     if holes:
         cards = ['<div class="grid">']
-        for latc, lonc, ps in holes:
+        for latc, lonc, ps, more in holes:
             items = "".join(
                 f'<li><label><input type="checkbox">'
                 f'<span class="name">{_esc(name)}</span>'
                 f'<span class="cat">{_esc(cat) or "&nbsp;"}</span></label></li>'
                 for name, cat, la, lo in ps)
+            if more:
+                items += f'<li class="more">+{more} more nearby (cap reached)</li>'
             cards.append(
                 '<article class="hole"><h2>'
                 f'<span class="badge">&#127919; {len(ps)}</span>'
@@ -603,15 +638,19 @@ function escapeHtml(s){ return String(s).replace(/[&<>"]/g,
   c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 const RC = {hole:'#dc2626', edge:'#f59e0b'};
 const targetHoles = [];   // holes that have named businesses -> feeds the target panel
-D.recs.forEach(([r,c,label,nb,pois])=>{
+D.recs.forEach(([r,c,label,nb,pois,more])=>{
   const b=bounds(r,c), ct=center(b);
+  more = more||0;
   let html='<b>'+(label==='hole'?'Hole (skipped)':'Edge (frontier)')+'</b><br>'
      +nb+' covered neighbours<br>'+maplink(ct[0],ct[1]);
-  if (pois && pois.length) html += '<br><b>targets:</b> '+pois.map(escapeHtml).join(', ');
+  if (pois && pois.length){
+    html += '<br><b>targets:</b> '+pois.map(escapeHtml).join(', ');
+    if (more) html += ' <i>+'+more+' more</i>';
+  }
   const rect = L.rectangle(b, {color:RC[label], weight:2, fillColor:RC[label], fillOpacity:.35})
    .bindPopup(html).addTo(map);
   if (label==='hole' && pois && pois.length)
-    targetHoles.push({center:ct, layer:rect, names:pois});
+    targetHoles.push({center:ct, layer:rect, names:pois, more:more});
 });
 
 // target panel (top-left) - only when --pois turned up businesses in holes
@@ -625,7 +664,8 @@ if (targetHoles.length){
       : '';
     const rows = targetHoles.map((h,i)=>
       '<li data-i="'+i+'"><span class="tn">'+h.names.length+'</span>'
-      + h.names.map(escapeHtml).join(', ')+'</li>').join('');
+      + h.names.map(escapeHtml).join(', ')
+      + (h.more ? ' <i>+'+h.more+' more</i>' : '')+'</li>').join('');
     d.innerHTML = '<button class="tcol" title="collapse">&#8211;</button>'
       + '<b>&#127919; Targets ('+targetHoles.length+')</b>'+doc
       + '<ul class="tlist">'+rows+'</ul>';
@@ -692,12 +732,14 @@ lg.addTo(map);
 
 
 def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=None,
-                map_key=None, poi_by_hole=None, targets_doc=None):
+                map_key=None, poi_by_hole=None, targets_doc=None, more_by_hole=None):
     poi_by_hole = poi_by_hole or {}
+    more_by_hole = more_by_hole or {}
     covered = covered_cells(coverage, min_obs)
     cov_list = [[r, c, coverage[(r, c)]] for (r, c) in covered]
     rec_list = [[x["cell"][0], x["cell"][1], x["label"], x["covered_neighbors"],
-                 [p[0] for p in poi_by_hole.get(tuple(x["cell"]), [])]] for x in recs]
+                 [p[0] for p in poi_by_hole.get(tuple(x["cell"]), [])],
+                 more_by_hole.get(tuple(x["cell"]), 0)] for x in recs]
     all_cells = list(covered) + [x["cell"] for x in recs]
     rows = [r for r, _ in all_cells] or [0]
     cols = [c for _, c in all_cells] or [0]
@@ -794,8 +836,12 @@ def parse_args():
     g.add_argument("--date", metavar="YYYY-MM-DD", help="map only the fixes from this local date")
     g.add_argument("--run-gap", type=float, default=RUN_GAP_MIN, metavar="MIN",
                    help=f"minutes of gap that separates one run from the next (default {RUN_GAP_MIN})")
-    g.add_argument("--pois", action="store_true",
-                   help="name the businesses (OpenStreetMap) inside each hole -> target list + popups")
+    g.add_argument("--pois", action=argparse.BooleanOptionalAction, default=True,
+                   help="name the businesses (OpenStreetMap) inside each hole (on by default; --no-pois to skip)")
+    g.add_argument("--max-pois-per-hole", type=int, default=MAX_POIS_PER_HOLE, metavar="N",
+                   help=f"cap businesses shown per hole; extras become '+N more' (default {MAX_POIS_PER_HOLE}; 0 = no cap)")
+    g.add_argument("--max-pois", type=int, default=MAX_POIS_TOTAL, metavar="N",
+                   help=f"cap total businesses across all holes, richest first (default {MAX_POIS_TOTAL}; 0 = no cap)")
 
     g = p.add_argument_group("grid + track tuning")
     g.add_argument("--cell-size", type=float, default=CELL_SIZE_M, metavar="M",
@@ -937,8 +983,8 @@ def run(args):
         track_segs = build_track_segments(
             track_fixes, args.track_gap * 60_000, TRACK_MIN_MOVE_M / EARTH_M_PER_DEG)
 
-    poi_by_hole = {}
-    if getattr(args, "pois", False):
+    poi_by_hole, more_by_hole = {}, {}
+    if getattr(args, "pois", True):
         hole_cells = [tuple(r["cell"]) for r in recs if r["label"] == "hole"]
         if not hole_cells:
             print("no holes to look up businesses for.")
@@ -949,9 +995,15 @@ def run(args):
             try:
                 pois = fetch_pois(min(rs) * dlat, min(cs) * dlon,
                                   (max(rs) + 1) * dlat, (max(cs) + 1) * dlon)
-                poi_by_hole = assign_pois_to_holes(pois, hole_cells, dlat, dlon)
-                n = sum(len(v) for v in poi_by_hole.values())
-                print(f"  {n} named POIs across {len(poi_by_hole)} holes (OSM/Overpass)")
+                found = assign_pois_to_holes(pois, hole_cells, dlat, dlon)
+                nfound = sum(len(v) for v in found.values())
+                # Trim for display: <= N per hole, then whole holes richest-first up to a total.
+                poi_by_hole, more_by_hole = cap_pois(
+                    found, recs, per_hole=getattr(args, "max_pois_per_hole", MAX_POIS_PER_HOLE),
+                    total=getattr(args, "max_pois", MAX_POIS_TOTAL))
+                nshown = sum(len(v) for v in poi_by_hole.values())
+                extra = "" if nshown == nfound else f" (capped from {nfound} across {len(found)})"
+                print(f"  {nshown} named POIs across {len(poi_by_hole)} holes{extra}")
             except Exception as exc:
                 print(f"  !! Overpass query failed ({exc}); rendering without targets")
 
@@ -964,12 +1016,13 @@ def run(args):
     if poi_by_hole:
         stem = os.path.splitext(out)[0]
         tpath_txt, tpath_html = stem + "_targets.txt", stem + "_targets.html"
-        write_targets(tpath_txt, recs, poi_by_hole, dlat, dlon)
-        render_targets_html(tpath_html, recs, poi_by_hole, dlat, dlon)
+        write_targets(tpath_txt, recs, poi_by_hole, dlat, dlon, more_by_hole)
+        render_targets_html(tpath_html, recs, poi_by_hole, dlat, dlon, more_by_hole)
 
     render_html(coverage, recs, dlat, dlon, args.min_obs, out,
                 track_segments=track_segs, map_key=read_map_key(), poi_by_hole=poi_by_hole,
-                targets_doc=os.path.basename(tpath_html) if tpath_html else None)
+                targets_doc=os.path.basename(tpath_html) if tpath_html else None,
+                more_by_hole=more_by_hole)
 
     print(_rule("="))
     print(f"  {len(points):,} points  ->  {C.b}{len(covered):,}{C.reset} covered cells (~{args.cell_size:.0f} m)")
@@ -1038,14 +1091,15 @@ def _menu_namespace(st, list_runs=False):
         run_gap=st["run_gap"], track_gap=st["track_gap"], list_runs=list_runs,
         run=st["run"] if st["mode"] == "run" else None,
         date=st["date"] if st["mode"] == "date" else None,
-        pois=st.get("pois", False), out=None, no_open=True, menu=False)
+        pois=st.get("pois", True), max_pois_per_hole=MAX_POIS_PER_HOLE, max_pois=MAX_POIS_TOTAL,
+        out=None, no_open=True, menu=False)
 
 
 def interactive_menu(args):
     st = {"data": args.data or DATA_DIR, "cell_size": args.cell_size, "min_obs": args.min_obs,
           "hole_threshold": args.hole_threshold, "run_gap": args.run_gap,
           "track_gap": args.track_gap, "mode": "all", "run": None, "date": None,
-          "pois": getattr(args, "pois", False)}
+          "pois": getattr(args, "pois", True)}
     _menu_status(st)
     _menu_help()
     while True:
