@@ -211,15 +211,16 @@ L.control.layers({'Streets (Esri)': baseStreet, 'Light gray': baseGray,
 function bounds(r,c){ return [[r*D.dlat, c*D.dlon], [(r+1)*D.dlat, (c+1)*D.dlon]]; }
 function covColor(n){ return n>=30?'#0b525b':n>=10?'#1c7c8c':n>=3?'#5aa7a7':'#a9d6d6'; }
 function center(b){ return [(b[0][0]+b[1][0])/2, (b[0][1]+b[1][1])/2]; }
-function gmaps(la,lo){ return la.toFixed(5)+', '+lo.toFixed(5)
-  +'<br><a href="https://www.google.com/maps/search/?api=1&query='+la.toFixed(5)+','+lo.toFixed(5)
-  +'" target="_blank" rel="noopener">Open in Google Maps</a>'; }
+function maplink(la,lo){ return la.toFixed(5)+', '+lo.toFixed(5)
+  +'<br><a href="https://www.openstreetmap.org/?mlat='+la.toFixed(5)+'&mlon='+lo.toFixed(5)
+  +'#map=18/'+la.toFixed(5)+'/'+lo.toFixed(5)
+  +'" target="_blank" rel="noopener">Open in OpenStreetMap</a>'; }
 
 // coverage (where you've been)
 D.covered.forEach(([r,c,n])=>{
   const b=bounds(r,c), ct=center(b);
   L.rectangle(b, {stroke:false, fillColor:covColor(n), fillOpacity:.55})
-   .bindPopup('Covered &middot; '+n+' networks<br>'+gmaps(ct[0],ct[1])).addTo(map);
+   .bindPopup('Covered &middot; '+n+' networks<br>'+maplink(ct[0],ct[1])).addTo(map);
 });
 // recommendations (where to go next)
 const RC = {hole:'#dc2626', edge:'#f59e0b'};
@@ -227,7 +228,7 @@ D.recs.forEach(([r,c,label,nb])=>{
   const b=bounds(r,c), ct=center(b);
   L.rectangle(b, {color:RC[label], weight:2, fillColor:RC[label], fillOpacity:.35})
    .bindPopup('<b>'+(label==='hole'?'Hole (skipped)':'Edge (frontier)')+'</b><br>'
-     +nb+' covered neighbours<br>'+gmaps(ct[0],ct[1])).addTo(map);
+     +nb+' covered neighbours<br>'+maplink(ct[0],ct[1])).addTo(map);
 });
 
 map.fitBounds(D.fit);

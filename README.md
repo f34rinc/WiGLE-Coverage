@@ -39,9 +39,9 @@ python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 75 --min-obs 2 --ou
 - **Orange cells** = *edges* — blank cells touching your coverage: the natural
   frontier to expand into.
 
-Each cell's popup gives its centre coordinate plus an **Open in Google Maps** link,
-so one click drops you at that exact spot with full business/place names (the free
-basemaps don't carry those). The top-right switcher offers Streets, Light gray,
+Each cell's popup gives its centre coordinate plus an **Open in OpenStreetMap** link,
+so one click drops you at that exact spot with full business/place names (the base
+tiles don't carry those). The top-right switcher offers Streets, Light gray,
 Satellite, and **Satellite + labels** — the last is handy for orienting among
 look-alike highrise blocks.
 
