@@ -490,35 +490,48 @@ def _launched_standalone():
 
 
 def parse_args():
+    epilog = (
+        "modes (auto-detected from what you give it):\n"
+        "  coverage   drop KML/CSV or a folder          ->  where you've been + gaps to fill\n"
+        "  history    give a .sqlite backup by itself   ->  whole history: coverage + your path\n"
+        "  one run    add  --run N   or  --date DATE    ->  just that one walk\n"
+        "  list runs  --list-runs                       ->  numbered index of sessions to pick\n"
+        "  menu       -i  (or run with no arguments)    ->  set it all interactively\n"
+    )
     p = argparse.ArgumentParser(
-        description="Map WiGLE coverage and recommend where to walk next.")
-    p.add_argument("paths", nargs="*",
-                   help="KML/CSV file(s), a folder, or globs (drag-drop friendly)")
-    p.add_argument("--cell-size", type=float, default=CELL_SIZE_M,
-                   help=f"grid cell edge in metres (default {CELL_SIZE_M}; below ~25 m "
-                        "mostly maps GPS scatter, not real gaps)")
-    p.add_argument("--min-obs", type=int, default=MIN_OBS,
-                   help=f"networks in a cell before it counts as covered (default {MIN_OBS})")
-    p.add_argument("--hole-threshold", type=int, default=HOLE_THRESHOLD,
-                   help=f"covered neighbours for a 'hole' vs 'edge' (default {HOLE_THRESHOLD})")
-    p.add_argument("--track", help="WiGLE SQLite backup: draws your path, and is the "
-                                   "source for --list-runs / --run / --date and the entire-DB view")
-    p.add_argument("--track-gap", type=float, default=TRACK_GAP_MIN,
-                   help=f"minutes between fixes that starts a new track segment (default {TRACK_GAP_MIN})")
-    p.add_argument("--list-runs", action="store_true",
-                   help="list the runs (sessions) in the --track backup and exit")
-    p.add_argument("--run", type=int, metavar="N",
-                   help="map only run N (from --list-runs): that session's coverage + path")
-    p.add_argument("--date", metavar="YYYY-MM-DD",
-                   help="map only the fixes from this local date")
-    p.add_argument("--run-gap", type=float, default=RUN_GAP_MIN,
-                   help=f"minutes of gap that separates one run from the next (default {RUN_GAP_MIN})")
-    p.add_argument("--data", metavar="DIR",
+        prog="wigle_coverage.py",
+        description="Map your WiGLE coverage and recommend where to walk next.",
+        epilog=epilog, formatter_class=argparse.RawDescriptionHelpFormatter)
+
+    g = p.add_argument_group("input  (what to read)")
+    g.add_argument("paths", nargs="*",
+                   help="KML/CSV, a .sqlite backup, a folder, or globs; empty = the ./data folder")
+    g.add_argument("--track", "--backup", "--db", dest="track", metavar="BACKUP",
+                   help="the WiGLE .sqlite backup - adds your path, and is the source for the run views")
+    g.add_argument("--data", metavar="DIR",
                    help=f"folder to read when no path is given (default: {DATA_DIR})")
-    p.add_argument("-i", "--menu", action="store_true",
-                   help="interactive menu to set options instead of passing flags")
-    p.add_argument("--out", help="output HTML path (default: beside the first input)")
-    p.add_argument("--no-open", action="store_true", help="don't auto-open the map")
+
+    g = p.add_argument_group("views  (which slice to map)")
+    g.add_argument("--list-runs", action="store_true", help="list the runs in the backup, then exit")
+    g.add_argument("--run", type=int, metavar="N", help="map only run N (see --list-runs)")
+    g.add_argument("--date", metavar="YYYY-MM-DD", help="map only the fixes from this local date")
+    g.add_argument("--run-gap", type=float, default=RUN_GAP_MIN, metavar="MIN",
+                   help=f"minutes of gap that separates one run from the next (default {RUN_GAP_MIN})")
+
+    g = p.add_argument_group("grid + track tuning")
+    g.add_argument("--cell-size", type=float, default=CELL_SIZE_M, metavar="M",
+                   help=f"cell edge in metres (default {CELL_SIZE_M}; below ~25 = GPS scatter)")
+    g.add_argument("--min-obs", type=int, default=MIN_OBS, metavar="N",
+                   help=f"networks in a cell for it to count as covered (default {MIN_OBS})")
+    g.add_argument("--hole-threshold", type=int, default=HOLE_THRESHOLD, metavar="N",
+                   help=f"covered neighbours for a hole vs an edge (default {HOLE_THRESHOLD})")
+    g.add_argument("--track-gap", type=float, default=TRACK_GAP_MIN, metavar="MIN",
+                   help=f"minutes that break the path into segments (default {TRACK_GAP_MIN})")
+
+    g = p.add_argument_group("interface + output")
+    g.add_argument("-i", "--menu", action="store_true", help="interactive menu instead of flags")
+    g.add_argument("--out", metavar="FILE", help="output HTML path (default: beside the input)")
+    g.add_argument("--no-open", action="store_true", help="don't auto-open the map in a browser")
     return p.parse_args()
 
 
@@ -693,13 +706,15 @@ def _menu_status(st):
 
 def _menu_help():
     y, r = C.yellow, C.reset
-    print(_rule(label="commands"))
-    print(f"  {y}runs{r}           list the runs (sessions) in the backup")
-    print(f"  {y}run{r} N          one run          {y}date{r} YYYY-MM-DD   one date")
-    print(f"  {y}all{r}            entire-DB / union view (the default)")
-    print(f"  {y}cell{r} N         grid size (m)    {y}min{r} N   min obs    {y}hole{r} N   threshold")
+    print(_rule(label="view - which slice to map"))
+    print(f"  {y}all{r}            whole history / union   {C.dim}(default){r}")
+    print(f"  {y}runs{r}           list the sessions in the backup")
+    print(f"  {y}run{r} N          just run N              {y}date{r} YYYY-MM-DD   just that date")
+    print(_rule(label="tune"))
+    print(f"  {y}cell{r} N         grid size (m)   {y}min{r} N   min obs   {y}hole{r} N   hole threshold")
     print(f"  {y}data{r} <path>    read a different folder")
-    print(f"  {y}go{r} (or Enter)  build + open     {y}help{r}  commands     {y}q{r}   quit")
+    print(_rule(label="go"))
+    print(f"  {y}go{r} (or Enter)  build + open the map    {y}help{r}   commands    {y}q{r}   quit")
     print(_rule("="))
 
 
