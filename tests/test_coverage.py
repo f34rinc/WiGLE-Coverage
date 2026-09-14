@@ -123,5 +123,37 @@ class TestPOIs(unittest.TestCase):
         self.assertNotIn(other, got)                            # non-hole POI dropped
 
 
+class TestTargetsHtml(unittest.TestCase):
+    def _dlatlon(self):
+        return wc.meters_to_deg(50, LAT)
+
+    def test_writes_doc_with_business_and_coord(self):
+        import tempfile
+        dlat, dlon = self._dlatlon()
+        hole = wc.cell_of(-22.9700, -43.1800, dlat, dlon)
+        recs = [{"cell": list(hole), "label": "hole", "covered_neighbors": 8}]
+        poi_by_hole = {hole: [("Padaria & Café <Zé>", "bakery", -22.97001, -43.18001)]}
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "t_targets.html")
+            wc.render_targets_html(p, recs, poi_by_hole, dlat, dlon)
+            with open(p, encoding="utf-8") as fh:
+                html = fh.read()
+        self.assertIn("<!doctype html>", html.lower())
+        self.assertIn("Padaria &amp; Caf", html)              # name is HTML-escaped, not raw
+        self.assertNotIn("<Zé>", html)                         # the < is escaped, never injected
+        latc = (hole[0] + 0.5) * dlat
+        self.assertIn(f"{latc:.5f}", html)                     # the hole's own coordinate is present
+
+    def test_empty_is_still_a_valid_doc(self):
+        import tempfile
+        dlat, dlon = self._dlatlon()
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "t_targets.html")
+            wc.render_targets_html(p, [], {}, dlat, dlon)      # no holes / no POIs -> must not crash
+            with open(p, encoding="utf-8") as fh:
+                html = fh.read()
+        self.assertIn("<!doctype html>", html.lower())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

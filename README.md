@@ -142,10 +142,18 @@ python wigle_coverage.py --pois
 #   > HOLE @ -22.970, -43.180  (4 targets): Padaria São José · Bar do Zé · Mercado · Farmácia
 ```
 
-The businesses show up in each hole's **popup** and in a `*_targets.txt` file beside the map
-(hole coordinate + OpenStreetMap link + each place, most-loaded holes first). It's **one
-polite Overpass query** per run (opt-in, off by default), and POIs are © OpenStreetMap
-contributors. OSM POI coverage varies by region — dense in much of Europe/North America,
+You get the same list **four ways**, so you can plan at the desk and work off it in the field:
+
+- in each hole's **map popup**;
+- in an in-map **"Targets" panel** (top-left) — click any row to fly the map to that hole and
+  open its popup, most-loaded holes first;
+- in a standalone **`*_targets.html`** — a self-contained, **offline, printable field sheet**
+  (a card per hole, a checkbox by each business to tick off as you go, an *Open in OpenStreetMap*
+  link). The panel links straight to it, or open it on your phone. No network needed once saved;
+- in a plain **`*_targets.txt`** (hole coordinate + OSM link + each place) for grepping/scripting.
+
+It's **one polite Overpass query** per run (opt-in, off by default), and POIs are © OpenStreetMap
+contributors (ODbL). OSM POI coverage varies by region — dense in much of Europe/North America,
 thinner elsewhere — so treat it as a "known targets" list, not an exhaustive one.
 
 ## Privacy

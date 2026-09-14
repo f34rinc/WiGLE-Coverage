@@ -34,8 +34,10 @@ HISTORICAL RUNS (SQLite only, since a KML has no timestamps):
     (with only --track and no run flag: the ENTIRE-DB view - all your history at once)
 
 TARGETS (--pois): name the businesses inside each 'hole' via OpenStreetMap (Overpass)
-so you get a hit-list of specific places to aim a future run at - shown in the hole
-popups and written to a <map>_targets.txt. OSM POI coverage varies by region.
+so you get a hit-list of specific places to aim a future run at. They show up four ways:
+in the hole popups; in an in-map "Targets" panel (click a row to fly to that hole); in a
+standalone, printable <map>_targets.html field sheet (linked from that panel); and in a
+plain <map>_targets.txt. OSM POI coverage varies by region.
 
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
 git-ignored. Nothing here is uploaded or published.
@@ -51,6 +53,7 @@ import glob
 import argparse
 import datetime
 import webbrowser
+from html import escape as _esc
 
 # ---- config defaults --------------------------------------------------------
 CELL_SIZE_M   = 50      # grid cell edge in metres (~half a block; near the GPS floor)
@@ -378,25 +381,142 @@ def assign_pois_to_holes(pois, hole_cells, dlat, dlon):
     return out
 
 
+def _targets_for_holes(recs, poi_by_hole, dlat, dlon):
+    """Holes that actually have named POIs, most-loaded first (the shared source of
+    truth for the .txt list, the HTML doc, and the in-map panel). Yields tuples of
+    (center_lat, center_lon, [pois sorted by name])."""
+    out = []
+    for r in recs:
+        if r["label"] != "hole":
+            continue
+        cell = tuple(r["cell"])
+        ps = poi_by_hole.get(cell) or []
+        if not ps:
+            continue
+        latc, lonc = (cell[0] + 0.5) * dlat, (cell[1] + 0.5) * dlon
+        out.append((latc, lonc, sorted(ps, key=lambda p: p[0].lower())))
+    out.sort(key=lambda t: -len(t[2]))
+    return out
+
+
+def _osm_link(latc, lonc):
+    return (f"https://www.openstreetmap.org/?mlat={latc:.5f}&mlon={lonc:.5f}"
+            f"#map=18/{latc:.5f}/{lonc:.5f}")
+
+
 def write_targets(path, recs, poi_by_hole, dlat, dlon):
     """Write a field target list: each hole with named businesses, most-loaded first."""
-    holes = [(tuple(r["cell"]), poi_by_hole.get(tuple(r["cell"]), []))
-             for r in recs if r["label"] == "hole"]
-    holes = sorted([(c, ps) for c, ps in holes if ps], key=lambda x: -len(x[1]))
+    holes = _targets_for_holes(recs, poi_by_hole, dlat, dlon)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("# wigle-coverage targets - named businesses inside your coverage 'holes'\n")
         fh.write(f"# {datetime.date.today():%Y-%m-%d} | POIs (c) OpenStreetMap contributors (ODbL)\n\n")
         if not holes:
             fh.write("(no named POIs found in any hole)\n")
             return
-        for cell, ps in holes:
-            latc, lonc = (cell[0] + 0.5) * dlat, (cell[1] + 0.5) * dlon
+        for latc, lonc, ps in holes:
             fh.write(f"HOLE {latc:.5f}, {lonc:.5f}  ({len(ps)} target(s))\n")
-            fh.write(f"  https://www.openstreetmap.org/?mlat={latc:.5f}&mlon={lonc:.5f}"
-                     f"#map=18/{latc:.5f}/{lonc:.5f}\n")
-            for name, cat, la, lo in sorted(ps, key=lambda p: p[0].lower()):
+            fh.write(f"  {_osm_link(latc, lonc)}\n")
+            for name, cat, la, lo in ps:
                 fh.write(f"    - {name}  [{cat}]  ({la:.5f}, {lo:.5f})\n")
             fh.write("\n")
+
+
+_TARGETS_DOC = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root{
+    --bg:#f4f5f4; --card:#ffffff; --ink:#1a2224; --muted:#5b6b6e; --line:#dce3e3;
+    --teal:#0b525b; --hole:#dc2626; --chip:#eef4f4; --link:#0b6b78;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#12181a; --card:#1a2325; --ink:#e7edee; --muted:#9fb0b3; --line:#2b3a3d;
+           --teal:#5aa7a7; --hole:#f06262; --chip:#20302f; --link:#7fd0dc; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:22px 16px 60px}
+  header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;
+             border-bottom:3px solid var(--teal);padding-bottom:12px;margin-bottom:6px}
+  h1{font-size:1.5rem;margin:0;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:.9rem}
+  .count{margin-left:auto;font-weight:600;color:var(--teal)}
+  .tip{color:var(--muted);font-size:.86rem;margin:10px 0 18px}
+  .btn{border:1px solid var(--line);background:var(--card);color:var(--ink);
+       border-radius:7px;padding:5px 11px;font:inherit;font-size:.85rem;cursor:pointer}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+  article.hole{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--hole);
+               border-radius:9px;padding:12px 14px;break-inside:avoid}
+  article.hole > h2{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:.98rem}
+  .badge{background:var(--hole);color:#fff;border-radius:999px;padding:1px 9px;font-size:.8rem;font-weight:700}
+  .coord{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.86rem}
+  .osm{margin-left:auto;color:var(--link);text-decoration:none;font-size:.82rem;white-space:nowrap}
+  .osm:hover{text-decoration:underline}
+  ul.pois{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+  ul.pois li label{display:flex;align-items:baseline;gap:8px;padding:3px 2px;cursor:pointer}
+  ul.pois li input{margin:0;transform:translateY(1px)}
+  .name{font-weight:500}
+  .cat{margin-left:auto;color:var(--muted);font-size:.78rem;background:var(--chip);
+       border-radius:5px;padding:1px 7px;white-space:nowrap}
+  .empty{color:var(--muted);background:var(--card);border:1px dashed var(--line);
+         border-radius:9px;padding:24px;text-align:center}
+  footer{color:var(--muted);font-size:.8rem;margin-top:26px;border-top:1px solid var(--line);padding-top:10px}
+  footer a{color:var(--link)}
+  @media print{
+    :root{--bg:#fff;--card:#fff;--ink:#000;--muted:#444;--line:#bbb;--chip:#eee}
+    .btn,.tip{display:none}
+    article.hole{border:1px solid #999}
+    .grid{grid-template-columns:1fr 1fr}
+  }
+</style></head><body><div class="wrap">
+<header class="top">
+  <h1>__H1__</h1>
+  <span class="sub">__SUB__</span>
+  <span class="count">__COUNT__</span>
+</header>
+<p class="tip">Tick each stop as you pass it. <button class="btn" onclick="window.print()">Print</button></p>
+__CARDS__
+<footer>Business names &amp; positions &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors (ODbL) &middot; generated by wigle-coverage. Coverage varies by region &mdash; treat this as a known-targets list, not an exhaustive one.</footer>
+</div></body></html>"""
+
+
+def render_targets_html(path, recs, poi_by_hole, dlat, dlon):
+    """Write a standalone, offline, print-friendly hit-list of the businesses inside
+    your coverage holes - a field sheet you can open on a phone (no network needed)."""
+    holes = _targets_for_holes(recs, poi_by_hole, dlat, dlon)
+    total = sum(len(ps) for _, _, ps in holes)
+    if holes:
+        cards = ['<div class="grid">']
+        for latc, lonc, ps in holes:
+            items = "".join(
+                f'<li><label><input type="checkbox">'
+                f'<span class="name">{_esc(name)}</span>'
+                f'<span class="cat">{_esc(cat) or "&nbsp;"}</span></label></li>'
+                for name, cat, la, lo in ps)
+            cards.append(
+                '<article class="hole"><h2>'
+                f'<span class="badge">&#127919; {len(ps)}</span>'
+                f'<span class="coord">{latc:.5f}, {lonc:.5f}</span>'
+                f'<a class="osm" href="{_esc(_osm_link(latc, lonc))}" target="_blank" '
+                'rel="noopener">OpenStreetMap &#8599;</a></h2>'
+                f'<ul class="pois">{items}</ul></article>')
+        cards.append("</div>")
+        cards_html = "\n".join(cards)
+    else:
+        cards_html = ('<div class="empty">No named businesses turned up inside any hole. '
+                      'OSM POI coverage is thin in some regions &mdash; the holes are still '
+                      'worth a walk.</div>')
+    doc = (_TARGETS_DOC
+           .replace("__TITLE__", "WiGLE targets")
+           .replace("__H1__", "&#127919; Target list")
+           .replace("__SUB__", f"holes with named businesses &middot; {datetime.date.today():%Y-%m-%d}")
+           .replace("__COUNT__", f"{len(holes)} holes &middot; {total} targets")
+           .replace("__CARDS__", cards_html))
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(doc)
+    return path
 
 
 # ---- HTML rendering ---------------------------------------------------------
@@ -423,6 +543,16 @@ _HTML = """<!doctype html>
           font:13px system-ui,sans-serif;line-height:1.5}
   .legend b{display:block;margin-bottom:4px}
   .sw{display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px;border:1px solid #0003}
+  .targets{max-width:264px}
+  .targets b{display:inline}
+  .targets .tcol{float:right;border:none;background:none;font:inherit;cursor:pointer;color:#555;padding:0 4px;line-height:1}
+  .targets .tdoc{display:block;margin:4px 0 2px;font-size:12px;color:#0b6b78;text-decoration:none}
+  .targets .tdoc:hover{text-decoration:underline}
+  .targets .tlist{list-style:none;margin:6px 0 0;padding:0;max-height:40vh;overflow:auto}
+  .targets .tlist li{padding:3px 4px;border-top:1px solid #eee;cursor:pointer;font-size:12px;line-height:1.35}
+  .targets .tlist li:hover{background:#f3f7f7}
+  .targets .tn{display:inline-block;min-width:18px;text-align:center;background:#dc2626;color:#fff;
+               border-radius:999px;font-size:11px;font-weight:700;padding:0 5px;margin-right:4px}
 </style></head><body><div id="map"></div>
 <script>
 const D = __DATA__;
@@ -469,15 +599,54 @@ D.covered.forEach(([r,c,n])=>{
    .bindPopup('Covered &middot; '+n+' networks<br>'+maplink(ct[0],ct[1])).addTo(map);
 });
 // recommendations (where to go next)
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g,
+  c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 const RC = {hole:'#dc2626', edge:'#f59e0b'};
+const targetHoles = [];   // holes that have named businesses -> feeds the target panel
 D.recs.forEach(([r,c,label,nb,pois])=>{
   const b=bounds(r,c), ct=center(b);
   let html='<b>'+(label==='hole'?'Hole (skipped)':'Edge (frontier)')+'</b><br>'
      +nb+' covered neighbours<br>'+maplink(ct[0],ct[1]);
-  if (pois && pois.length) html += '<br><b>targets:</b> '+pois.join(', ');
-  L.rectangle(b, {color:RC[label], weight:2, fillColor:RC[label], fillOpacity:.35})
+  if (pois && pois.length) html += '<br><b>targets:</b> '+pois.map(escapeHtml).join(', ');
+  const rect = L.rectangle(b, {color:RC[label], weight:2, fillColor:RC[label], fillOpacity:.35})
    .bindPopup(html).addTo(map);
+  if (label==='hole' && pois && pois.length)
+    targetHoles.push({center:ct, layer:rect, names:pois});
 });
+
+// target panel (top-left) - only when --pois turned up businesses in holes
+if (targetHoles.length){
+  targetHoles.sort((a,b)=> b.names.length - a.names.length);   // most-loaded first
+  const panel = L.control({position:'topleft'});
+  panel.onAdd = function(){
+    const d = L.DomUtil.create('div','legend targets');
+    const doc = D.targetsDoc
+      ? '<a class="tdoc" href="'+encodeURI(D.targetsDoc)+'" target="_blank" rel="noopener">open printable list &#8599;</a>'
+      : '';
+    const rows = targetHoles.map((h,i)=>
+      '<li data-i="'+i+'"><span class="tn">'+h.names.length+'</span>'
+      + h.names.map(escapeHtml).join(', ')+'</li>').join('');
+    d.innerHTML = '<button class="tcol" title="collapse">&#8211;</button>'
+      + '<b>&#127919; Targets ('+targetHoles.length+')</b>'+doc
+      + '<ul class="tlist">'+rows+'</ul>';
+    L.DomEvent.disableClickPropagation(d);
+    L.DomEvent.disableScrollPropagation(d);
+    const ul = d.querySelector('.tlist'), btn = d.querySelector('.tcol');
+    ul.addEventListener('click', function(ev){       // row -> fly to the hole + open its popup
+      const li = ev.target.closest('li'); if(!li) return;
+      const h = targetHoles[+li.dataset.i];
+      map.flyTo(h.center, Math.max(map.getZoom(), 17));
+      h.layer.openPopup();
+    });
+    btn.addEventListener('click', function(){         // collapse / expand the list
+      const hidden = ul.style.display==='none';
+      ul.style.display = hidden ? '' : 'none';
+      btn.innerHTML = hidden ? '&#8211;' : '+';
+    });
+    return d;
+  };
+  panel.addTo(map);
+}
 
 // your actual path (from the SQLite location table), split into time-gap segments
 if (D.track && D.track.length){
@@ -523,7 +692,7 @@ lg.addTo(map);
 
 
 def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=None,
-                map_key=None, poi_by_hole=None):
+                map_key=None, poi_by_hole=None, targets_doc=None):
     poi_by_hole = poi_by_hole or {}
     covered = covered_cells(coverage, min_obs)
     cov_list = [[r, c, coverage[(r, c)]] for (r, c) in covered]
@@ -535,9 +704,15 @@ def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=No
     fit = [[min(rows) * dlat, min(cols) * dlon],
            [(max(rows) + 1) * dlat, (max(cols) + 1) * dlon]]
     data = {"dlat": dlat, "dlon": dlon, "covered": cov_list, "recs": rec_list,
-            "fit": fit, "track": track_segments or [], "mapKey": map_key or ""}
+            "fit": fit, "track": track_segments or [], "mapKey": map_key or "",
+            "targetsDoc": targets_doc or ""}
     title = "WiGLE coverage &amp; frontier"
-    html = _HTML.replace("__DATA__", json.dumps(data)).replace("__TITLE__", title)
+    # Escape <, >, & in the embedded JSON so a POI name from OSM can't break out of the
+    # <script> block (e.g. a business literally named "</script>"). JSON \uXXXX escapes
+    # parse straight back to the original characters in JS.
+    blob = (json.dumps(data)
+            .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+    html = _HTML.replace("__DATA__", blob).replace("__TITLE__", title)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(html)
     return out_path
@@ -782,8 +957,19 @@ def run(args):
 
     out = args.out or os.path.join(
         base_dir or os.getcwd(), f"wigle_coverage{tag}_{datetime.date.today():%Y%m%d}.html")
+
+    # Targets: write both the plain-text list and the printable HTML doc, and hand the
+    # doc's name to the map so it can link out to it (and drive its target panel).
+    tpath_txt = tpath_html = None
+    if poi_by_hole:
+        stem = os.path.splitext(out)[0]
+        tpath_txt, tpath_html = stem + "_targets.txt", stem + "_targets.html"
+        write_targets(tpath_txt, recs, poi_by_hole, dlat, dlon)
+        render_targets_html(tpath_html, recs, poi_by_hole, dlat, dlon)
+
     render_html(coverage, recs, dlat, dlon, args.min_obs, out,
-                track_segments=track_segs, map_key=read_map_key(), poi_by_hole=poi_by_hole)
+                track_segments=track_segs, map_key=read_map_key(), poi_by_hole=poi_by_hole,
+                targets_doc=os.path.basename(tpath_html) if tpath_html else None)
 
     print(_rule("="))
     print(f"  {len(points):,} points  ->  {C.b}{len(covered):,}{C.reset} covered cells (~{args.cell_size:.0f} m)")
@@ -791,9 +977,8 @@ def run(args):
     if track_segs:
         print(f"  track: {sum(len(s) for s in track_segs):,} points in {len(track_segs)} segment(s)")
     if poi_by_hole:
-        tpath = os.path.splitext(out)[0] + "_targets.txt"
-        write_targets(tpath, recs, poi_by_hole, dlat, dlon)
-        print(f"  targets: {tpath}")
+        print(f"  targets: {tpath_txt}")
+        print(f"           {tpath_html}  {C.dim}(printable hit-list){C.reset}")
     print(f"  {C.green}map:{C.reset} {out}")
     print(_rule("="))
     return out
