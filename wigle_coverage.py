@@ -59,6 +59,40 @@ EARTH_M_PER_DEG = 111320.0
 # Default folder read when no path/--track is given: a "data" folder beside this script
 # (git-ignored). Drop your KML/CSV + .sqlite backup here and just run the tool.
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+
+# ---- console colour (cross-platform; degrades to plain text) -----------------
+class _C:
+    def __init__(self, on):
+        e = (lambda s: s if on else "")
+        self.reset = e("\033[0m"); self.b = e("\033[1m"); self.dim = e("\033[2m")
+        self.cyan = e("\033[36m"); self.yellow = e("\033[33m")
+        self.green = e("\033[32m"); self.red = e("\033[31m")
+
+
+def setup_color():
+    """Enable ANSI colour when writing to a real terminal (honours NO_COLOR); on
+    Windows this flips the console into virtual-terminal mode."""
+    on = not os.environ.get("NO_COLOR") and sys.stdout.isatty()
+    if on and os.name == "nt":
+        try:
+            import ctypes
+            k = ctypes.windll.kernel32
+            k.SetConsoleMode(k.GetStdHandle(-11), 7)  # ENABLE_...VIRTUAL_TERMINAL_PROCESSING
+        except Exception:
+            on = False
+    return _C(on)
+
+
+C = _C(False)          # replaced by setup_color() at startup
+_RULE_W = 56
+
+
+def _rule(char="=", label=""):
+    if label:
+        head = f"-- {label} "
+        return C.dim + head + "-" * max(0, _RULE_W - len(head)) + C.reset
+    return C.dim + char * _RULE_W + C.reset
 # -----------------------------------------------------------------------------
 
 
@@ -519,11 +553,14 @@ def run(args):
         if not runs:
             print("No timestamped fixes in that backup.")
             return None
-        print(f"{len(runs)} run(s) in {os.path.basename(sqlite_path)} "
-              f"(split on >{args.run_gap:.0f} min gaps):\n")
-        for i, r in enumerate(runs, 1):
-            print(f"  [{i:>3}] {_fmt_run(r)}")
-        print("\nView one with:  --run N   (or)   --date YYYY-MM-DD")
+        print(f"\n{C.b}{len(runs)} run(s){C.reset} in {os.path.basename(sqlite_path)}  "
+              f"{C.dim}(split on >{args.run_gap:.0f} min gaps){C.reset}")
+        print(_rule("-"))
+        print(f"  {C.dim}  #  date          time         dur      fixes{C.reset}")
+        for i, rn in enumerate(runs, 1):
+            print(f"  {C.cyan}[{i:>3}]{C.reset} {_fmt_run(rn)}")
+        print(_rule("-"))
+        print(f"view one:  {C.yellow}--run N{C.reset}  or  {C.yellow}--date YYYY-MM-DD{C.reset}")
         return None
 
     # ---- choose the coverage source + track fixes ----
@@ -612,11 +649,13 @@ def run(args):
         base_dir or os.getcwd(), f"wigle_coverage{tag}_{datetime.date.today():%Y%m%d}.html")
     render_html(coverage, recs, dlat, dlon, args.min_obs, out, track_segments=track_segs)
 
-    print(f"\n  {len(points):,} points  ->  {len(covered):,} covered cells (~{args.cell_size:.0f} m)")
-    print(f"  recommendations: {holes} holes (skipped) + {edges} edges (frontier)")
+    print(_rule("="))
+    print(f"  {len(points):,} points  ->  {C.b}{len(covered):,}{C.reset} covered cells (~{args.cell_size:.0f} m)")
+    print(f"  recommend: {C.red}{holes} holes{C.reset} (skipped) + {C.yellow}{edges} edges{C.reset} (frontier)")
     if track_segs:
-        print(f"  track: {sum(len(s) for s in track_segs):,} points, {len(track_segs)} segment(s)")
-    print(f"  map: {out}")
+        print(f"  track: {sum(len(s) for s in track_segs):,} points in {len(track_segs)} segment(s)")
+    print(f"  {C.green}map:{C.reset} {out}")
+    print(_rule("="))
     return out
 
 
@@ -631,29 +670,37 @@ def _detect_data(data_dir):
 
 def _menu_status(st):
     kml, sq = _detect_data(st["data"])
-    print("\nwigle-coverage")
     if kml or sq:
         bits = []
         if kml:
             bits.append(f"{len(kml)} KML/CSV")
         if sq:
-            bits.append(f"backup: {os.path.basename(max(sq, key=os.path.getmtime))}")
-        print(f"  data: {st['data']}   ({', '.join(bits)})")
+            bits.append("backup: " + os.path.basename(max(sq, key=os.path.getmtime)))
+        found = " | ".join(bits)
     else:
-        print(f"  data: {st['data']}   (empty - drop KML/CSV or a .sqlite backup here)")
+        found = C.red + "empty - drop KML/CSV or a .sqlite backup here" + C.reset
     mode = ("run %d" % st["run"] if st["mode"] == "run"
             else "date %s" % st["date"] if st["mode"] == "date" else "entire-DB / union")
-    print(f"  cell {st['cell_size']:.0f} m  min-obs {st['min_obs']}  mode: {mode}")
+    b, r, g = C.b, C.reset, C.green
+    print()
+    print(f" {C.b}{C.cyan}wigle-coverage{r}")
+    print(_rule("="))
+    print(f"  {b}data {r} | {st['data']}")
+    print(f"  {b}found{r} | {found}")
+    print(f"  {b}grid {r} | cell {g}{st['cell_size']:.0f} m{r} | min-obs {st['min_obs']} | hole {st['hole_threshold']}")
+    print(f"  {b}mode {r} | {g}{mode}{r}")
 
 
 def _menu_help():
-    print("""  commands:
-    runs             list the runs (sessions) in the backup
-    run N            view just run N          date YYYY-MM-DD   view one date
-    all              entire-DB / union view (the default)
-    cell N           grid size in metres      min N             networks/cell to count
-    hole N           hole-vs-edge threshold   data <path>       read a different folder
-    go  (or Enter)   build + open the map     help              this list      q   quit""")
+    y, r = C.yellow, C.reset
+    print(_rule(label="commands"))
+    print(f"  {y}runs{r}           list the runs (sessions) in the backup")
+    print(f"  {y}run{r} N          one run          {y}date{r} YYYY-MM-DD   one date")
+    print(f"  {y}all{r}            entire-DB / union view (the default)")
+    print(f"  {y}cell{r} N         grid size (m)    {y}min{r} N   min obs    {y}hole{r} N   threshold")
+    print(f"  {y}data{r} <path>    read a different folder")
+    print(f"  {y}go{r} (or Enter)  build + open     {y}help{r}  commands     {y}q{r}   quit")
+    print(_rule("="))
 
 
 def _menu_namespace(st, list_runs=False):
@@ -670,7 +717,6 @@ def interactive_menu(args):
     st = {"data": args.data or DATA_DIR, "cell_size": args.cell_size, "min_obs": args.min_obs,
           "hole_threshold": args.hole_threshold, "run_gap": args.run_gap,
           "track_gap": args.track_gap, "mode": "all", "run": None, "date": None}
-    print("=" * 60)
     _menu_status(st)
     _menu_help()
     while True:
@@ -723,6 +769,8 @@ def interactive_menu(args):
 
 
 def main():
+    global C
+    C = setup_color()
     args = parse_args()
     try:
         os.makedirs(DATA_DIR, exist_ok=True)   # ensure the drop folder exists
