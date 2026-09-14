@@ -14,8 +14,9 @@ whole `WiGLE data` folder — onto `wigle_coverage.py`. It unions everything, bu
 the map, and opens it in your browser.
 
 > Coverage is most meaningful from the **union of all your exports**, so dragging the
-> whole folder (or selecting all the KMLs together) is the sweet spot. A single
-> run-KML just maps that one run's footprint.
+> whole folder is the sweet spot — it auto-uses the KMLs for coverage and the **newest
+> `.sqlite` backup for the track**. A single run-KML just maps that one run's footprint.
+> A `.sqlite` backup on its own (dropped or passed) drives **both** coverage and path.
 
 **Command line:**
 

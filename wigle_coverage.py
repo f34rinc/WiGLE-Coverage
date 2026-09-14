@@ -5,11 +5,11 @@ you HAVE walked and, more usefully, recommends where you HAVEN'T: the blank cell
 on the frontier of your footprint (walk outward) and the holes inside it (streets
 you skipped). Output is a self-contained local Leaflet HTML map.
 
-DRAG-AND-DROP (Windows): drop one or more .kml / WiGLE .csv files - or the whole
-folder - onto this script. It unions everything, builds the map, and opens it in
-your browser. Coverage is most meaningful from the UNION of all your exports, so
-dragging the whole "WiGLE data" folder (or selecting all the KMLs) is the sweet
-spot; a single run-KML just maps that one run.
+DRAG-AND-DROP (Windows): drop .kml / WiGLE .csv files, a .sqlite backup, or the whole
+folder onto this script. KML/CSV give coverage; a SQLite backup adds your path (and,
+by itself, is a full coverage+path map). It unions everything, builds the map, and
+opens it. Dragging the whole "WiGLE data" folder is the sweet spot - it auto-uses the
+KMLs for coverage and the newest .sqlite backup for the track.
 
 CLI:
     python wigle_coverage.py "<dir or file(s)>" [--cell-size 50] [--min-obs 2]
@@ -19,7 +19,8 @@ CLI:
 YOUR ACTUAL PATH: pass --track pointing at a WiGLE SQLite backup and the map adds a
 toggle-able blue polyline of where you actually walked (raw GPS fixes from its
 `location` table, split into segments on time gaps). The cells come from the KML/CSV;
-the track from the SQLite. (Track is CLI-only - drag-drop just does coverage.)
+the track from the SQLite. The backup also works as a positional/dropped input - on
+its own it drives BOTH coverage and path (the entire-DB view).
 
 HISTORICAL RUNS (SQLite only, since a KML has no timestamps):
     --list-runs                list the sessions in the backup (index, date, span, fixes)
@@ -155,13 +156,25 @@ def parse_any(path):
     return iter(())
 
 
+def _is_sqlite(path):
+    """True if the file starts with the SQLite magic (handles a backup with no
+    extension, like 'WiGLE Database Backup')."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(16).startswith(b"SQLite format 3")
+    except OSError:
+        return False
+
+
 def expand_inputs(paths):
-    """Turn dropped args (files, folders, globs) into a flat list of KML/CSV files."""
+    """Turn dropped args (files, folders, globs) into a flat list of input files -
+    KML/CSV for coverage and SQLite backups for track/run views. A folder is
+    scanned for all of them so drag-dropping the WiGLE data folder 'just works'."""
     out = []
     for p in paths:
         if os.path.isdir(p):
-            for ext in ("*.kml", "*.csv"):
-                out += glob.glob(os.path.join(p, ext))
+            for pat in ("*.kml", "*.csv", "*.sqlite", "*.db", "*Database Backup*"):
+                out += glob.glob(os.path.join(p, pat))
         elif any(ch in p for ch in "*?[]"):
             out += glob.glob(p)
         elif os.path.isfile(p):
@@ -464,12 +477,21 @@ def parse_args():
 
 
 def run(args):
+    # Gather inputs, then split: SQLite backups (positional or --track) vs KML/CSV.
+    inputs = expand_inputs(args.paths)
+    sqlite_files = [f for f in inputs if _is_sqlite(f)]
+    cover_files = [f for f in inputs if f not in sqlite_files]
     sqlite_path = args.track
+    if not sqlite_path and sqlite_files:
+        sqlite_files.sort(key=os.path.getmtime, reverse=True)   # newest backup wins
+        sqlite_path = sqlite_files[0]
+        if len(sqlite_files) > 1:
+            print(f"using newest SQLite backup: {os.path.basename(sqlite_path)}")
 
     # --list-runs: enumerate sessions in the backup and exit (no map)
     if args.list_runs:
         if not sqlite_path:
-            print('--list-runs needs a SQLite backup: pass --track "...\\WiGLE Database Backup.sqlite"')
+            print("--list-runs needs a SQLite backup - drag it in or pass --track.")
             return None
         fixes, err = _load_fixes(sqlite_path)
         if err:
@@ -508,7 +530,7 @@ def run(args):
         if not sel:
             print(f"No fixes for {what}.")
             return None
-        if args.paths:
+        if cover_files:
             print("  (run mode: ignoring KML/CSV args - coverage comes from the SQLite session)")
         print(f"{what}: {_fmt_run(sel)}")
         points = [(la, lo) for (_, la, lo) in sel]
@@ -516,11 +538,10 @@ def run(args):
         base_dir = os.path.dirname(os.path.abspath(sqlite_path))
 
     else:
-        files = expand_inputs(args.paths)
-        if files:                                   # coverage from KML/CSV (household/whole)
-            print(f"reading {len(files)} file(s)...")
+        if cover_files:                             # coverage from KML/CSV (household/whole)
+            print(f"reading {len(cover_files)} file(s)...")
             raw = []
-            for f in files:
+            for f in cover_files:
                 n0 = len(raw)
                 raw.extend(parse_any(f))
                 print(f"  {os.path.basename(f)}: {len(raw) - n0:,} points")
@@ -530,7 +551,7 @@ def run(args):
             dd = len(raw) - len(points)
             if dd:
                 print(f"  dropped {dd:,} invalid/zero coordinates")
-            base_dir = os.path.dirname(os.path.abspath(files[0]))
+            base_dir = os.path.dirname(os.path.abspath(cover_files[0]))
             if sqlite_path:
                 print(f"reading track from {os.path.basename(sqlite_path)}...")
                 track_fixes, err = _load_fixes(sqlite_path)
@@ -545,7 +566,8 @@ def run(args):
             points = [(la, lo) for (_, la, lo) in track_fixes]
             base_dir = os.path.dirname(os.path.abspath(sqlite_path))
         else:
-            print('No input. Pass KML/CSV path(s) and/or --track "<SQLite backup>".')
+            print("No input. Drag in a WiGLE KML/CSV or a .sqlite backup "
+                  '(or pass paths / --track "<backup>").')
             return None
 
     if not points:
