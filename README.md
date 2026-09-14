@@ -20,12 +20,12 @@ the map, and opens it in your browser.
 **Command line:**
 
 ```
-python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 100 --min-obs 2 --out map.html
+python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 75 --min-obs 2 --out map.html
 ```
 
 | flag | default | meaning |
 |---|--:|---|
-| `--cell-size` | 100 | grid cell edge, metres (~one city block; try 50 for finer) |
+| `--cell-size` | 75 | grid cell edge, metres (~most of a block; try 50/100 to taste) |
 | `--min-obs` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
 | `--hole-threshold` | 5 | covered neighbours (of 8) for a cell to rank as a "hole" vs an "edge" |
 | `--out` | *beside first input* | output HTML path |
@@ -39,7 +39,11 @@ python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 100 --min-obs 2 --o
 - **Orange cells** = *edges* — blank cells touching your coverage: the natural
   frontier to expand into.
 
-Each suggestion's popup gives its centre coordinate so you can point a map at it.
+Each cell's popup gives its centre coordinate plus an **Open in Google Maps** link,
+so one click drops you at that exact spot with full business/place names (the free
+basemaps don't carry those). The top-right switcher offers Streets, Light gray,
+Satellite, and **Satellite + labels** — the last is handy for orienting among
+look-alike highrise blocks.
 
 ## Privacy
 

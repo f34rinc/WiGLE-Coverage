@@ -12,7 +12,7 @@ dragging the whole "WiGLE data" folder (or selecting all the KMLs) is the sweet
 spot; a single run-KML just maps that one run.
 
 CLI:
-    python wigle_coverage.py "<dir or file(s)>" [--cell-size 100] [--min-obs 2]
+    python wigle_coverage.py "<dir or file(s)>" [--cell-size 75] [--min-obs 2]
                              [--hole-threshold 5] [--out map.html] [--no-open]
 
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
@@ -31,7 +31,7 @@ import datetime
 import webbrowser
 
 # ---- config defaults --------------------------------------------------------
-CELL_SIZE_M   = 100     # grid cell edge in metres (~one city block)
+CELL_SIZE_M   = 75      # grid cell edge in metres (~most of a city block)
 MIN_OBS       = 2       # APs in a cell before it counts as "covered" (filters strays)
 HOLE_THRESHOLD = 5      # covered 8-neighbours at/above this => "hole", else "edge"
 EARTH_M_PER_DEG = 111320.0
@@ -193,32 +193,41 @@ const D = __DATA__;
 const map = L.map('map');
 // OSM's own servers block file:// requests and CARTO now nags without an API key,
 // so use Esri's keyless, nag-free basemaps (fine from a local file).
-const baseStreet = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
-  {maxZoom:19, attribution:'Tiles &copy; Esri'});
-const baseGray = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-  {maxZoom:16, attribution:'Tiles &copy; Esri'});
-const baseSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  {maxZoom:19, attribution:'Tiles &copy; Esri, Maxar, Earthstar Geographics'});
+const esri = (svc, mz) => L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/'+svc+'/MapServer/tile/{z}/{y}/{x}',
+  {maxZoom: mz||19, attribution:'Tiles &copy; Esri'});
+const baseStreet = esri('World_Street_Map', 19);
+const baseGray   = esri('Canvas/World_Light_Gray_Base', 16);
+const baseSat    = esri('World_Imagery', 19);
+// imagery + label/road overlays = "hybrid" for orienting in dense highrise blocks
+const baseHybrid = L.layerGroup([esri('World_Imagery', 19),
+                                 esri('Reference/World_Transportation', 19),
+                                 esri('Reference/World_Boundaries_and_Places', 19)]);
 baseStreet.addTo(map);
-L.control.layers({'Streets (Esri)': baseStreet, 'Light gray': baseGray, 'Satellite': baseSat},
+L.control.layers({'Streets (Esri)': baseStreet, 'Light gray': baseGray,
+                  'Satellite': baseSat, 'Satellite + labels': baseHybrid},
   null, {position:'topright'}).addTo(map);
 
 function bounds(r,c){ return [[r*D.dlat, c*D.dlon], [(r+1)*D.dlat, (c+1)*D.dlon]]; }
 function covColor(n){ return n>=30?'#0b525b':n>=10?'#1c7c8c':n>=3?'#5aa7a7':'#a9d6d6'; }
+function center(b){ return [(b[0][0]+b[1][0])/2, (b[0][1]+b[1][1])/2]; }
+function gmaps(la,lo){ return la.toFixed(5)+', '+lo.toFixed(5)
+  +'<br><a href="https://www.google.com/maps/search/?api=1&query='+la.toFixed(5)+','+lo.toFixed(5)
+  +'" target="_blank" rel="noopener">Open in Google Maps</a>'; }
 
 // coverage (where you've been)
 D.covered.forEach(([r,c,n])=>{
-  L.rectangle(bounds(r,c), {stroke:false, fillColor:covColor(n), fillOpacity:.55})
-   .bindPopup('Covered &middot; '+n+' networks').addTo(map);
+  const b=bounds(r,c), ct=center(b);
+  L.rectangle(b, {stroke:false, fillColor:covColor(n), fillOpacity:.55})
+   .bindPopup('Covered &middot; '+n+' networks<br>'+gmaps(ct[0],ct[1])).addTo(map);
 });
 // recommendations (where to go next)
 const RC = {hole:'#dc2626', edge:'#f59e0b'};
 D.recs.forEach(([r,c,label,nb])=>{
-  const b = bounds(r,c);
+  const b=bounds(r,c), ct=center(b);
   L.rectangle(b, {color:RC[label], weight:2, fillColor:RC[label], fillOpacity:.35})
    .bindPopup('<b>'+(label==='hole'?'Hole (skipped)':'Edge (frontier)')+'</b><br>'
-     +nb+' covered neighbours<br>center '
-     +((b[0][0]+b[1][0])/2).toFixed(5)+', '+((b[0][1]+b[1][1])/2).toFixed(5)).addTo(map);
+     +nb+' covered neighbours<br>'+gmaps(ct[0],ct[1])).addTo(map);
 });
 
 map.fitBounds(D.fit);
