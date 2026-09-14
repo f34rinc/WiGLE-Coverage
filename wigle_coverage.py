@@ -37,9 +37,13 @@ TARGETS (on by default; --no-pois to skip): name the businesses inside each 'hol
 OpenStreetMap (Overpass) so you get a hit-list of specific places to aim a future run at.
 They show up four ways: in the hole popups; in an in-map "Targets" panel (click a row to
 fly to that hole); in a standalone, printable <map>_targets.html field sheet (linked from
-that panel); and in a plain <map>_targets.txt. The list is trimmed for usefulness -
+that panel); and in a plain <map>_targets.txt. The printable sheet groups holes by postcode
+(then neighborhood, then "unlocated") and shows each business's street address when OSM has
+one - falling back to the coordinate when it doesn't. The list is trimmed for usefulness -
 --max-pois-per-hole (default 10) and --max-pois (default 100, richest holes first); extras
-show as "+N more". OSM POI coverage varies by region.
+show as "+N more". Overpass responses are cached locally (./.poi_cache, ~30 days) so re-runs
+over the same area don't re-query OSM; --refresh-pois forces a fresh pull. OSM address/POI
+coverage varies worldwide.
 
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
 git-ignored. Nothing here is uploaded or published.
@@ -50,12 +54,15 @@ import os
 import re
 import sys
 import json
-import math
 import glob
+import time
+import math
+import hashlib
 import argparse
 import datetime
 import webbrowser
 from html import escape as _esc
+from collections import namedtuple, Counter
 
 # ---- config defaults --------------------------------------------------------
 CELL_SIZE_M   = 50      # grid cell edge in metres (~half a block; near the GPS floor)
@@ -70,6 +77,13 @@ OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 POI_KEYS = ("shop", "amenity", "office", "tourism", "leisure", "craft")
 MAX_POIS_PER_HOLE = 10   # businesses shown per hole (0 = no cap); extras become "+N more"
 MAX_POIS_TOTAL    = 100  # total businesses across all holes, richest holes first (0 = no cap)
+# One named business from OSM. Address fields (universal OSM addr:* tags) may be blank -
+# coverage varies worldwide - so every consumer falls back gracefully when they're empty.
+POI = namedtuple("POI", "name cat lat lon street housenumber postcode suburb")
+# Local cache of Overpass responses so re-runs over the same area don't re-query OSM.
+POI_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".poi_cache")
+POI_CACHE_TTL_DAYS = 30
+POI_CACHE_GRID = 0.01    # snap the query bbox to this degree grid so nearby runs share a hit
 # Default folder read when no path/--track is given: a "data" folder beside this script
 # (git-ignored). Drop your KML/CSV + .sqlite backup here and just run the tool.
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
@@ -346,8 +360,9 @@ def _load_fixes(path):
 
 # ---- POIs (name the businesses in each hole, via OpenStreetMap / Overpass) ----
 def fetch_pois(south, west, north, east, timeout=60):
-    """One Overpass query for named POIs (shops/amenities/...) in a bbox. Returns
-    [(name, category, lat, lon), ...]. Raises on failure (caller degrades)."""
+    """One Overpass query for named POIs (shops/amenities/...) in a bbox. Returns a list of
+    POI records; address fields come from OSM addr:* tags (often blank). Raises on failure
+    (caller degrades). `out ... tags` already returns addr:* - no extra request/cost."""
     import urllib.request
     import urllib.parse
     parts = "".join(f'nwr["name"]["{k}"]({south},{west},{north},{east});' for k in POI_KEYS)
@@ -370,8 +385,54 @@ def fetch_pois(south, west, north, east, timeout=60):
             lat, lon = c.get("lat"), c.get("lon")
         if lat is None:
             continue
-        out.append((name, cat, float(lat), float(lon)))
+        # universal OSM address tags; suburb ~ neighborhood/district (falls back a couple ways)
+        suburb = (tags.get("addr:suburb") or tags.get("addr:neighbourhood")
+                  or tags.get("addr:district") or tags.get("addr:city") or "")
+        out.append(POI(name, cat, float(lat), float(lon),
+                       tags.get("addr:street", ""), tags.get("addr:housenumber", ""),
+                       tags.get("addr:postcode", ""), suburb))
     return out
+
+
+def _snap_bbox(south, west, north, east, grid=POI_CACHE_GRID):
+    """Expand a bbox outward to a fixed degree grid so nearby runs share one cache tile
+    (and the query covers at least the requested area)."""
+    return (math.floor(south / grid) * grid, math.floor(west / grid) * grid,
+            math.ceil(north / grid) * grid, math.ceil(east / grid) * grid)
+
+
+def _poi_cache_path(bbox, cache_dir):
+    key = "|".join(f"{v:.2f}" for v in bbox) + "|" + ",".join(POI_KEYS) + "|v2"
+    return os.path.join(cache_dir, "poi_" + hashlib.sha1(key.encode()).hexdigest()[:16] + ".json")
+
+
+def fetch_pois_cached(south, west, north, east, timeout=60, refresh=False,
+                      cache_dir=None, ttl_days=POI_CACHE_TTL_DAYS):
+    """fetch_pois with an on-disk cache keyed by the snapped bbox, so re-running over the
+    same area (tweaking grid params, etc.) doesn't re-query OSM. Returns (pois, from_cache).
+    A one-query-per-area courtesy to the volunteer-run Overpass service."""
+    if cache_dir is None:
+        cache_dir = POI_CACHE_DIR          # resolved at call time (tests/callers can override)
+    bbox = _snap_bbox(south, west, north, east)
+    path = _poi_cache_path(bbox, cache_dir)
+    if not refresh and os.path.exists(path):
+        try:
+            if time.time() - os.path.getmtime(path) < ttl_days * 86400:
+                with open(path, encoding="utf-8") as fh:
+                    rows = json.load(fh)
+                return [POI(*r) for r in rows], True
+        except Exception:
+            pass                                   # unreadable/stale cache -> just refetch
+    pois = fetch_pois(*bbox, timeout=timeout)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump([list(p) for p in pois], fh)
+        os.replace(tmp, path)                       # atomic write
+    except Exception:
+        pass                                        # caching is best-effort
+    return pois, False
 
 
 def assign_pois_to_holes(pois, hole_cells, dlat, dlon):
@@ -434,8 +495,52 @@ def _osm_link(latc, lonc):
             f"#map=18/{latc:.5f}/{lonc:.5f}")
 
 
+def poi_address(p):
+    """A one-line street address for a POI from its OSM tags, or '' if none is mapped."""
+    if not getattr(p, "street", ""):
+        return ""
+    return f"{p.housenumber} {p.street}".strip() if getattr(p, "housenumber", "") else p.street
+
+
+def _modal(values):
+    """The most common non-empty value (the hole's representative street/postcode/area)."""
+    vals = [v for v in values if v]
+    return Counter(vals).most_common(1)[0][0] if vals else ""
+
+
+def group_targets(holes):
+    """Group holes into sections for the printable list: primarily by postcode; holes with
+    no postcode fall back to their neighborhood (OSM addr:suburb); holes with neither go to a
+    single 'unlocated' section. Worldwide-neutral - the header IS the raw postcode/area value.
+    `holes` is the _targets_for_holes output. Returns an ordered list of
+    (section_label, [hole_dict, ...]) where each hole_dict has lat/lon/pois/more plus its
+    representative street/postcode/area."""
+    enriched = []
+    for latc, lonc, ps, more in holes:
+        enriched.append({
+            "lat": latc, "lon": lonc, "pois": ps, "more": more,
+            "street": _modal(p.street for p in ps),
+            "postcode": _modal(p.postcode for p in ps),
+            "area": _modal(p.suburb for p in ps)})
+    sections = {}
+    for h in enriched:
+        if h["postcode"]:
+            key, label = ("0", h["postcode"]), h["postcode"]
+        elif h["area"]:
+            key, label = ("1", h["area"]), f"{h['area']} (no postcode)"
+        else:
+            key, label = ("2", ""), "unlocated"
+        sections.setdefault(key, {"label": label, "holes": []})["holes"].append(h)
+    ordered = []
+    for key in sorted(sections):
+        holes_sorted = sorted(sections[key]["holes"], key=lambda h: (-len(h["pois"]), -h["more"]))
+        ordered.append((sections[key]["label"], holes_sorted))
+    return ordered
+
+
 def write_targets(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None):
-    """Write a field target list: each hole with named businesses, most-loaded first."""
+    """Write a field target list: businesses inside your holes, grouped by postcode (then
+    neighborhood, then unlocated), each with its street address when OSM has one."""
     holes = _targets_for_holes(recs, poi_by_hole, dlat, dlon, more_by_hole)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("# wigle-coverage targets - named businesses inside your coverage 'holes'\n")
@@ -443,13 +548,18 @@ def write_targets(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None):
         if not holes:
             fh.write("(no named POIs found in any hole)\n")
             return
-        for latc, lonc, ps, more in holes:
-            fh.write(f"HOLE {latc:.5f}, {lonc:.5f}  ({len(ps)} target(s))\n")
-            fh.write(f"  {_osm_link(latc, lonc)}\n")
-            for name, cat, la, lo in ps:
-                fh.write(f"    - {name}  [{cat}]  ({la:.5f}, {lo:.5f})\n")
-            if more:
-                fh.write(f"    ... (+{more} more not shown)\n")
+        for label, sec_holes in group_targets(holes):
+            fh.write(f"== {label} ==\n")
+            for h in sec_holes:
+                head = h["street"] or f"{h['lat']:.5f}, {h['lon']:.5f}"
+                fh.write(f"  HOLE {head}  ({len(h['pois'])} target(s))\n")
+                fh.write(f"    {_osm_link(h['lat'], h['lon'])}\n")
+                for p in h["pois"]:
+                    addr = poi_address(p)
+                    tail = f"  @ {addr}" if addr else ""
+                    fh.write(f"      - {p.name}  [{p.cat}]{tail}\n")
+                if h["more"]:
+                    fh.write(f"      ... (+{h['more']} more not shown)\n")
             fh.write("\n")
 
 
@@ -478,19 +588,27 @@ _TARGETS_DOC = """<!doctype html>
   .tip{color:var(--muted);font-size:.86rem;margin:10px 0 18px}
   .btn{border:1px solid var(--line);background:var(--card);color:var(--ink);
        border-radius:7px;padding:5px 11px;font:inherit;font-size:.85rem;cursor:pointer}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+  .zone{margin:22px 0 8px;display:flex;align-items:baseline;gap:10px}
+  .zone h2{font-size:1.05rem;margin:0;color:var(--teal);letter-spacing:.2px}
+  .zone .zc{color:var(--muted);font-size:.8rem}
+  .zone::after{content:"";flex:1;border-bottom:1px solid var(--line);align-self:center}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
   article.hole{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--hole);
                border-radius:9px;padding:12px 14px;break-inside:avoid}
   article.hole > h2{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:.98rem}
   .badge{background:var(--hole);color:#fff;border-radius:999px;padding:1px 9px;font-size:.8rem;font-weight:700}
+  .street{font-weight:600}
   .coord{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.86rem}
   .osm{margin-left:auto;color:var(--link);text-decoration:none;font-size:.82rem;white-space:nowrap}
   .osm:hover{text-decoration:underline}
-  ul.pois{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
-  ul.pois li label{display:flex;align-items:baseline;gap:8px;padding:3px 2px;cursor:pointer}
+  ul.pois{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+  ul.pois li{display:flex;align-items:baseline;gap:8px;padding:3px 2px}
+  ul.pois li label{display:flex;align-items:baseline;gap:8px;cursor:pointer;flex:1;min-width:0}
   ul.pois li input{margin:0;transform:translateY(1px)}
   .name{font-weight:500}
-  .cat{margin-left:auto;color:var(--muted);font-size:.78rem;background:var(--chip);
+  .addr{color:var(--muted);font-size:.82rem}
+  .addr.none{font-style:italic;opacity:.8}
+  .cat{color:var(--muted);font-size:.78rem;background:var(--chip);
        border-radius:5px;padding:1px 7px;white-space:nowrap}
   li.more{color:var(--muted);font-size:.8rem;font-style:italic;padding:3px 2px}
   .empty{color:var(--muted);background:var(--card);border:1px dashed var(--line);
@@ -515,30 +633,44 @@ __CARDS__
 </div></body></html>"""
 
 
+def _poi_li(p):
+    addr = poi_address(p)
+    addr_html = (f'<span class="addr">&mdash; {_esc(addr)}</span>' if addr
+                 else '<span class="addr none">no address</span>')
+    return (f'<li><label><input type="checkbox">'
+            f'<span class="name">{_esc(p.name)}</span>{addr_html}</label>'
+            f'<span class="cat">{_esc(p.cat) or "&nbsp;"}</span></li>')
+
+
 def render_targets_html(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None):
-    """Write a standalone, offline, print-friendly hit-list of the businesses inside
-    your coverage holes - a field sheet you can open on a phone (no network needed)."""
+    """Write a standalone, offline, print-friendly hit-list of the businesses inside your
+    coverage holes, grouped by postcode (then neighborhood, then unlocated) with each
+    business's street address - a field sheet you can open on a phone (no network needed)."""
     holes = _targets_for_holes(recs, poi_by_hole, dlat, dlon, more_by_hole)
     total = sum(len(ps) for _, _, ps, _ in holes)
+    sections = group_targets(holes)
     if holes:
-        cards = ['<div class="grid">']
-        for latc, lonc, ps, more in holes:
-            items = "".join(
-                f'<li><label><input type="checkbox">'
-                f'<span class="name">{_esc(name)}</span>'
-                f'<span class="cat">{_esc(cat) or "&nbsp;"}</span></label></li>'
-                for name, cat, la, lo in ps)
-            if more:
-                items += f'<li class="more">+{more} more nearby (cap reached)</li>'
-            cards.append(
-                '<article class="hole"><h2>'
-                f'<span class="badge">&#127919; {len(ps)}</span>'
-                f'<span class="coord">{latc:.5f}, {lonc:.5f}</span>'
-                f'<a class="osm" href="{_esc(_osm_link(latc, lonc))}" target="_blank" '
-                'rel="noopener">OpenStreetMap &#8599;</a></h2>'
-                f'<ul class="pois">{items}</ul></article>')
-        cards.append("</div>")
-        cards_html = "\n".join(cards)
+        blocks = []
+        for label, sec_holes in sections:
+            secn = sum(len(h["pois"]) for h in sec_holes)
+            cards = []
+            for h in sec_holes:
+                items = "".join(_poi_li(p) for p in h["pois"])
+                if h["more"]:
+                    items += f'<li class="more">+{h["more"]} more nearby (cap reached)</li>'
+                head = (f'<span class="street">{_esc(h["street"])}</span>' if h["street"]
+                        else f'<span class="coord">{h["lat"]:.5f}, {h["lon"]:.5f}</span>')
+                cards.append(
+                    '<article class="hole"><h2>'
+                    f'<span class="badge">&#127919; {len(h["pois"])}</span>{head}'
+                    f'<a class="osm" href="{_esc(_osm_link(h["lat"], h["lon"]))}" target="_blank" '
+                    'rel="noopener">map &#8599;</a></h2>'
+                    f'<ul class="pois">{items}</ul></article>')
+            blocks.append(
+                f'<div class="zone"><h2>{_esc(label)}</h2>'
+                f'<span class="zc">{len(sec_holes)} hole(s) &middot; {secn} target(s)</span></div>'
+                f'<div class="grid">{"".join(cards)}</div>')
+        cards_html = "\n".join(blocks)
     else:
         cards_html = ('<div class="empty">No named businesses turned up inside any hole. '
                       'OSM POI coverage is thin in some regions &mdash; the holes are still '
@@ -546,8 +678,8 @@ def render_targets_html(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None):
     doc = (_TARGETS_DOC
            .replace("__TITLE__", "WiGLE targets")
            .replace("__H1__", "&#127919; Target list")
-           .replace("__SUB__", f"holes with named businesses &middot; {datetime.date.today():%Y-%m-%d}")
-           .replace("__COUNT__", f"{len(holes)} holes &middot; {total} targets")
+           .replace("__SUB__", f"by postcode &middot; {datetime.date.today():%Y-%m-%d}")
+           .replace("__COUNT__", f"{len(holes)} holes &middot; {total} targets &middot; {len(sections)} areas")
            .replace("__CARDS__", cards_html))
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(doc)
@@ -842,6 +974,8 @@ def parse_args():
                    help=f"cap businesses shown per hole; extras become '+N more' (default {MAX_POIS_PER_HOLE}; 0 = no cap)")
     g.add_argument("--max-pois", type=int, default=MAX_POIS_TOTAL, metavar="N",
                    help=f"cap total businesses across all holes, richest first (default {MAX_POIS_TOTAL}; 0 = no cap)")
+    g.add_argument("--refresh-pois", action="store_true",
+                   help="ignore the local POI cache and re-query OpenStreetMap for this area")
 
     g = p.add_argument_group("grid + track tuning")
     g.add_argument("--cell-size", type=float, default=CELL_SIZE_M, metavar="M",
@@ -991,10 +1125,13 @@ def run(args):
         else:
             rs = [c[0] for c in hole_cells]
             cs = [c[1] for c in hole_cells]
-            print(f"querying OpenStreetMap (Overpass) for businesses in {len(hole_cells)} holes...")
+            print(f"looking up businesses (OpenStreetMap) in {len(hole_cells)} holes...")
             try:
-                pois = fetch_pois(min(rs) * dlat, min(cs) * dlon,
-                                  (max(rs) + 1) * dlat, (max(cs) + 1) * dlon)
+                pois, cached = fetch_pois_cached(
+                    min(rs) * dlat, min(cs) * dlon, (max(rs) + 1) * dlat, (max(cs) + 1) * dlon,
+                    refresh=getattr(args, "refresh_pois", False))
+                print(f"  {'cache hit (no OSM query)' if cached else 'queried Overpass'}"
+                      f"{C.dim} - {len(pois)} named places in the area{C.reset}")
                 found = assign_pois_to_holes(pois, hole_cells, dlat, dlon)
                 nfound = sum(len(v) for v in found.values())
                 # Trim for display: <= N per hole, then whole holes richest-first up to a total.
@@ -1092,7 +1229,7 @@ def _menu_namespace(st, list_runs=False):
         run=st["run"] if st["mode"] == "run" else None,
         date=st["date"] if st["mode"] == "date" else None,
         pois=st.get("pois", True), max_pois_per_hole=MAX_POIS_PER_HOLE, max_pois=MAX_POIS_TOTAL,
-        out=None, no_open=True, menu=False)
+        refresh_pois=False, out=None, no_open=True, menu=False)
 
 
 def interactive_menu(args):

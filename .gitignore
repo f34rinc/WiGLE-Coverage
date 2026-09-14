@@ -13,6 +13,9 @@ out/
 # your personal map API key - never commit (map_key.txt.example is the template)
 map_key.txt
 
+# cached OpenStreetMap/Overpass responses (so re-runs don't re-query OSM)
+.poi_cache/
+
 # Python
 __pycache__/
 *.py[cod]

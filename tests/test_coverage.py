@@ -14,7 +14,12 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import wigle_coverage as wc  # noqa: E402
 
-LAT = -22.97  # Rio-ish, for realistic dlon/dlat
+LAT = -22.97  # a mid-latitude sample, for realistic dlon/dlat (nothing region-specific)
+
+
+def poi(name, cat="shop", lat=0.0, lon=0.0, street="", hn="", postcode="", suburb=""):
+    """Build a wc.POI with sensible blanks - most tests only care about a couple of fields."""
+    return wc.POI(name, cat, lat, lon, street, hn, postcode, suburb)
 
 
 class TestGrid(unittest.TestCase):
@@ -115,11 +120,11 @@ class TestPOIs(unittest.TestCase):
         dlat, dlon = wc.meters_to_deg(50, LAT)
         hole = wc.cell_of(-22.9700, -43.1800, dlat, dlon)
         other = wc.cell_of(-22.9900, -43.2000, dlat, dlon)   # not a hole
-        pois = [("Padaria", "bakery", -22.97001, -43.18001),   # inside the hole cell
-                ("FarAway", "bar", -22.99001, -43.20001)]      # outside any hole
+        pois = [poi("Padaria", "bakery", -22.97001, -43.18001),   # inside the hole cell
+                poi("FarAway", "bar", -22.99001, -43.20001)]      # outside any hole
         got = wc.assign_pois_to_holes(pois, [hole], dlat, dlon)
         self.assertIn(hole, got)
-        self.assertEqual([p[0] for p in got[hole]], ["Padaria"])
+        self.assertEqual([p.name for p in got[hole]], ["Padaria"])
         self.assertNotIn(other, got)                            # non-hole POI dropped
 
 
@@ -128,7 +133,7 @@ class TestCapPois(unittest.TestCase):
         return [{"cell": list(c), "label": "hole", "covered_neighbors": 8} for c in cells]
 
     def _mk(self, n, tag):
-        return [(f"{tag}{i}", "shop", 0.0, 0.0) for i in range(n)]
+        return [poi(f"{tag}{i}") for i in range(n)]
 
     def test_no_caps_keeps_everything(self):
         cells = [(0, 0), (0, 1)]
@@ -160,12 +165,13 @@ class TestTargetsHtml(unittest.TestCase):
     def _dlatlon(self):
         return wc.meters_to_deg(50, LAT)
 
-    def test_writes_doc_with_business_and_coord(self):
+    def test_doc_shows_address_and_groups_by_postcode(self):
         import tempfile
         dlat, dlon = self._dlatlon()
         hole = wc.cell_of(-22.9700, -43.1800, dlat, dlon)
         recs = [{"cell": list(hole), "label": "hole", "covered_neighbors": 8}]
-        poi_by_hole = {hole: [("Padaria & Café <Zé>", "bakery", -22.97001, -43.18001)]}
+        poi_by_hole = {hole: [poi("Padaria & Café <Zé>", "bakery", -22.97001, -43.18001,
+                                  street="Rua X", hn="502", postcode="22070-011")]}
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "t_targets.html")
             wc.render_targets_html(p, recs, poi_by_hole, dlat, dlon)
@@ -174,8 +180,25 @@ class TestTargetsHtml(unittest.TestCase):
         self.assertIn("<!doctype html>", html.lower())
         self.assertIn("Padaria &amp; Caf", html)              # name is HTML-escaped, not raw
         self.assertNotIn("<Zé>", html)                         # the < is escaped, never injected
+        self.assertIn("22070-011", html)                       # postcode section header
+        self.assertIn("502 Rua X", html)                       # the street address is shown
+        self.assertIn('class="street"', html)                  # hole labeled by its street, not coord
+
+    def test_doc_unlocated_falls_back_to_coordinate(self):
+        import tempfile
+        dlat, dlon = self._dlatlon()
+        hole = wc.cell_of(-22.9700, -43.1800, dlat, dlon)
+        recs = [{"cell": list(hole), "label": "hole", "covered_neighbors": 8}]
+        poi_by_hole = {hole: [poi("Mercadinho", "shop", -22.97001, -43.18001)]}   # no address
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "t_targets.html")
+            wc.render_targets_html(p, recs, poi_by_hole, dlat, dlon)
+            with open(p, encoding="utf-8") as fh:
+                html = fh.read()
+        self.assertIn("unlocated", html)                       # goes to the catch-all section
+        self.assertIn("no address", html)                      # per-POI graceful fallback
         latc = (hole[0] + 0.5) * dlat
-        self.assertIn(f"{latc:.5f}", html)                     # the hole's own coordinate is present
+        self.assertIn(f"{latc:.5f}", html)                     # hole header falls back to the coordinate
 
     def test_empty_is_still_a_valid_doc(self):
         import tempfile
@@ -186,6 +209,66 @@ class TestTargetsHtml(unittest.TestCase):
             with open(p, encoding="utf-8") as fh:
                 html = fh.read()
         self.assertIn("<!doctype html>", html.lower())
+
+
+class TestGroupTargets(unittest.TestCase):
+    def test_postcode_primary_then_neighborhood_then_unlocated(self):
+        # holes are (lat, lon, [POI], more) - the _targets_for_holes shape
+        h_zip = (0.0, 0.0, [poi("A", street="S1", postcode="111")], 0)
+        h_sub = (1.0, 1.0, [poi("B", street="S2", suburb="Riverside")], 0)   # no postcode
+        h_non = (2.0, 2.0, [poi("C")], 0)                                     # neither
+        groups = wc.group_targets([h_sub, h_non, h_zip])
+        labels = [g[0] for g in groups]
+        self.assertEqual(labels[0], "111")                    # postcode section sorts first
+        self.assertIn("Riverside", labels[1])                  # neighborhood fallback next
+        self.assertIn("no postcode", labels[1])
+        self.assertEqual(labels[-1], "unlocated")              # the catch-all comes last
+
+    def test_hole_street_is_the_modal_street(self):
+        ps = [poi("A", street="Main St"), poi("B", street="Main St"), poi("C", street="Side St")]
+        (label, holes) = wc.group_targets([(0.0, 0.0, ps, 0)])[0]
+        self.assertEqual(holes[0]["street"], "Main St")        # representative = most common street
+
+
+class TestPoiCache(unittest.TestCase):
+    def test_second_call_hits_cache_without_querying(self):
+        import tempfile
+        calls = {"n": 0}
+        real = wc.fetch_pois
+
+        def fake(s, w, n, e, timeout=60):
+            calls["n"] += 1
+            return [wc.POI("Shop", "shop", (s + n) / 2, (w + e) / 2, "", "", "", "")]
+
+        wc.fetch_pois = fake
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                a = wc.fetch_pois_cached(-22.97, -43.18, -22.96, -43.17, cache_dir=d)
+                b = wc.fetch_pois_cached(-22.97, -43.18, -22.96, -43.17, cache_dir=d)
+        finally:
+            wc.fetch_pois = real
+        self.assertEqual(calls["n"], 1)                        # only the first call queried OSM
+        self.assertFalse(a[1])                                 # (pois, from_cache): first is a miss
+        self.assertTrue(b[1])                                  # second is served from cache
+        self.assertEqual([p.name for p in b[0]], ["Shop"])     # round-trips JSON back into POI
+
+    def test_refresh_bypasses_cache(self):
+        import tempfile
+        calls = {"n": 0}
+        real = wc.fetch_pois
+
+        def fake(s, w, n, e, timeout=60):
+            calls["n"] += 1
+            return []
+
+        wc.fetch_pois = fake
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                wc.fetch_pois_cached(-1.0, -1.0, 0.0, 0.0, cache_dir=d)
+                wc.fetch_pois_cached(-1.0, -1.0, 0.0, 0.0, cache_dir=d, refresh=True)
+        finally:
+            wc.fetch_pois = real
+        self.assertEqual(calls["n"], 2)                        # --refresh forced a fresh query
 
 
 if __name__ == "__main__":

@@ -147,10 +147,18 @@ You get the same list **four ways**, so you can plan at the desk and work off it
 - in each hole's **map popup**;
 - in an in-map **"Targets" panel** (top-left) — click any row to fly the map to that hole and
   open its popup, most-loaded holes first;
-- in a standalone **`*_targets.html`** — a self-contained, **offline, printable field sheet**
-  (a card per hole, a checkbox by each business to tick off as you go, an *Open in OpenStreetMap*
-  link). The panel links straight to it, or open it on your phone. No network needed once saved;
-- in a plain **`*_targets.txt`** (hole coordinate + OSM link + each place) for grepping/scripting.
+- in a standalone **`*_targets.html`** — a self-contained, **offline, printable field sheet**.
+  It **groups holes by postcode** (then by neighborhood where a postcode isn't mapped, then a
+  catch-all "unlocated"), labels each hole by its **street**, and lists every business with its
+  **street address** — with a checkbox to tick off as you go. The panel links straight to it, or
+  open it on your phone. No network needed once saved;
+- in a plain **`*_targets.txt`** (same grouping + addresses) for grepping/scripting.
+
+> **Addresses come from OpenStreetMap and coverage varies worldwide** — dense in much of
+> Europe/North America, thinner elsewhere. When a business has no `addr:*` tags the sheet falls
+> back gracefully (the coordinate still powers the map link), and postcode-less holes drop to the
+> neighborhood or "unlocated" section. We read the address tags from the *same* query — **no extra
+> load** on OSM.
 
 **Kept manageable.** The list is trimmed so it stays useful, not overwhelming:
 
@@ -159,10 +167,13 @@ You get the same list **four ways**, so you can plan at the desk and work off it
 | `--max-pois-per-hole` | 10 | most businesses shown per hole; extras collapse to a **"+N more"** note |
 | `--max-pois` | 100 | total across all holes — keeps the **richest holes whole**, drops the sparsest past the budget |
 
-Set either to `0` to lift that cap. It's **one polite Overpass query** per run, and POIs are
-© OpenStreetMap contributors (ODbL). OSM POI coverage varies by region — dense in much of
-Europe/North America, thinner elsewhere — so treat it as a "known targets" list, not an
-exhaustive one.
+Set either to `0` to lift that cap.
+
+**Polite to OpenStreetMap.** It's **one Overpass query** per area, and the response is **cached
+locally** (`./.poi_cache/`, ~30 days, git-ignored) — so re-running over the same ground (tweaking
+`--cell-size`, `--min-obs`, etc.) doesn't re-query OSM at all. Pass **`--refresh-pois`** to force a
+fresh pull. POIs are © OpenStreetMap contributors (ODbL); treat the result as a "known targets"
+list, not an exhaustive one.
 
 ## Privacy
 
