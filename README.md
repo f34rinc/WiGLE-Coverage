@@ -24,6 +24,31 @@ python wigle_coverage.py
 `-i` / `--menu` forces the menu even with other flags; `--data DIR` points at a
 different folder. Everything below still works as one-shot CLI flags for scripting.
 
+## Best input: the WiGLE "Database Backup" (`.sqlite`)
+
+**Export the entire database.** The `.sqlite` backup is the single best file to feed this
+tool, because it carries everything in one place:
+
+- **coverage** — every network's location (where you were),
+- **your actual track path** — the timestamped GPS breadcrumb (drawn as the blue line), and
+- **timestamps** — which unlock the run views (`--list-runs`, `--run N`, `--date`).
+
+A KML/CSV export has *none* of the track or timing — just network locations — so a backup
+alone does more than a whole folder of KMLs. Drop one in `data/` (or pass it) and you get
+coverage **and** path **and** run-slicing from that one file.
+
+### How to export it from the WiGLE app (Android)
+
+1. Open the **WiGLE WiFi Wardriving** app.
+2. Go to the **Data** tab (where the KML/CSV export buttons are).
+3. Tap **"Backup DB"** / **"Database Backup"** (button labels vary a little by version).
+4. It writes a `.sqlite` file to the phone — usually the `wiglewifi` folder, often timestamped
+   (e.g. `WiGLE Database Backup 091426_01.sqlite`).
+5. Copy that file to your PC and drop it in this tool's `data/` folder.
+
+> It's a **point-in-time snapshot** and **per-phone** — take a fresh backup for your latest
+> walks, and back up each phone separately if more than one person collects.
+
 ## Use it
 
 **Drag-and-drop (Windows):** drop one or more `.kml` / WiGLE `.csv` files — or the
