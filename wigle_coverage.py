@@ -279,10 +279,29 @@ D.recs.forEach(([r,c,label,nb])=>{
 
 // your actual path (from the SQLite location table), split into time-gap segments
 if (D.track && D.track.length){
-  const trk = L.layerGroup(D.track.map(seg =>
-    L.polyline(seg, {color:'#2563eb', weight:2, opacity:.8})));
-  trk.addTo(map);
+  const trackLines = D.track.map(seg =>
+    L.polyline(seg, {color:'#2563eb', weight:2, opacity:.85}));
+  const trk = L.layerGroup(trackLines).addTo(map);
   layerCtl.addOverlay(trk, 'Your track');
+  // live colour picker for the track line
+  const picker = L.control({position:'bottomleft'});
+  picker.onAdd = function(){
+    const d = L.DomUtil.create('div', 'legend');
+    d.innerHTML = '<b>Track colour</b>';
+    const sel = L.DomUtil.create('select', '', d);
+    [['#2563eb','Blue'],['#0891b2','Cyan'],['#16a34a','Green'],['#7c3aed','Purple'],
+     ['#db2777','Magenta'],['#dc2626','Red'],['#f59e0b','Orange'],['#111827','Black']]
+      .forEach(([hex,name])=>{ const o=document.createElement('option'); o.value=hex; o.text=name; sel.add(o); });
+    L.DomEvent.disableClickPropagation(d);
+    L.DomEvent.disableScrollPropagation(d);
+    sel.addEventListener('change', function(){
+      trackLines.forEach(pl => pl.setStyle({color: sel.value}));
+      const sw = document.getElementById('trkSw');
+      if (sw) sw.style.background = sel.value;
+    });
+    return d;
+  };
+  picker.addTo(map);
 }
 
 map.fitBounds(D.fit);
@@ -293,7 +312,7 @@ lg.onAdd = function(){ const d=L.DomUtil.create('div','legend');
    + '<div><span class="sw" style="background:#0b525b"></span>covered (dense &rarr; light)</div>'
    + '<div><span class="sw" style="background:#dc2626"></span>hole &ndash; skipped street</div>'
    + '<div><span class="sw" style="background:#f59e0b"></span>edge &ndash; walk outward</div>'
-   + (D.track && D.track.length ? '<div><span class="sw" style="background:#2563eb"></span>your track</div>' : '')
+   + (D.track && D.track.length ? '<div><span class="sw" id="trkSw" style="background:#2563eb"></span>your track</div>' : '')
    + '<div style="margin-top:4px;color:#555">'+D.covered.length+' covered cells &middot; '
    + D.recs.length+' suggestions</div>';
   return d; };
