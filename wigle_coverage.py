@@ -21,6 +21,12 @@ toggle-able blue polyline of where you actually walked (raw GPS fixes from its
 `location` table, split into segments on time gaps). The cells come from the KML/CSV;
 the track from the SQLite. (Track is CLI-only - drag-drop just does coverage.)
 
+HISTORICAL RUNS (SQLite only, since a KML has no timestamps):
+    --list-runs                list the sessions in the backup (index, date, span, fixes)
+    --run N                    map just that session's coverage + path
+    --date 2026-09-13          map just that local date
+    (with only --track and no run flag: the ENTIRE-DB view - all your history at once)
+
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
 git-ignored. Nothing here is uploaded or published.
 
@@ -42,6 +48,7 @@ MIN_OBS       = 2       # APs in a cell before it counts as "covered" (filters s
 HOLE_THRESHOLD = 5      # covered 8-neighbours at/above this => "hole", else "edge"
 TRACK_GAP_MIN  = 5      # minutes; a larger gap between fixes starts a new track segment
 TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one (jitter)
+RUN_GAP_MIN    = 30     # minutes of quiet that separates one run/session from the next
 EARTH_M_PER_DEG = 111320.0
 # -----------------------------------------------------------------------------
 
@@ -207,6 +214,47 @@ def build_track_segments(rows, gap_ms, min_move_deg):
     if len(cur) >= 2:
         segs.append(cur)
     return segs
+
+
+def sessionize(fixes, gap_ms):
+    """Group time-sorted (time, lat, lon) fixes into runs (sessions), splitting on a
+    gap larger than gap_ms. Returns [[(t,lat,lon), ...], ...] - one list per run."""
+    runs, cur, last_t = [], [], None
+    for f in fixes:
+        if last_t is not None and f[0] - last_t > gap_ms:
+            if cur:
+                runs.append(cur)
+            cur = []
+        cur.append(f)
+        last_t = f[0]
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def filter_by_date(fixes, date_str):
+    """Keep fixes whose LOCAL date equals date_str (YYYY-MM-DD)."""
+    import datetime
+    day = datetime.date.fromisoformat(date_str)
+    return [f for f in fixes
+            if datetime.datetime.fromtimestamp(f[0] / 1000).date() == day]
+
+
+def _fmt_run(run):
+    """One-line summary of a run: date, local start-end, duration, fix count."""
+    import datetime
+    s = datetime.datetime.fromtimestamp(run[0][0] / 1000)
+    e = datetime.datetime.fromtimestamp(run[-1][0] / 1000)
+    dur = (run[-1][0] - run[0][0]) / 60000.0
+    return f"{s:%Y-%m-%d}  {s:%H:%M}-{e:%H:%M}  {dur:4.0f}m  {len(run):>7,} fixes"
+
+
+def _load_fixes(path):
+    """parse_sqlite_track with a friendly error. Returns (fixes, error_or_None)."""
+    try:
+        return parse_sqlite_track(path), None
+    except Exception as exc:
+        return None, str(exc)
 
 
 # ---- HTML rendering ---------------------------------------------------------
@@ -398,35 +446,110 @@ def parse_args():
                    help=f"networks in a cell before it counts as covered (default {MIN_OBS})")
     p.add_argument("--hole-threshold", type=int, default=HOLE_THRESHOLD,
                    help=f"covered neighbours for a 'hole' vs 'edge' (default {HOLE_THRESHOLD})")
-    p.add_argument("--track", help="WiGLE SQLite backup to draw your actual walked path from")
+    p.add_argument("--track", help="WiGLE SQLite backup: draws your path, and is the "
+                                   "source for --list-runs / --run / --date and the entire-DB view")
     p.add_argument("--track-gap", type=float, default=TRACK_GAP_MIN,
                    help=f"minutes between fixes that starts a new track segment (default {TRACK_GAP_MIN})")
+    p.add_argument("--list-runs", action="store_true",
+                   help="list the runs (sessions) in the --track backup and exit")
+    p.add_argument("--run", type=int, metavar="N",
+                   help="map only run N (from --list-runs): that session's coverage + path")
+    p.add_argument("--date", metavar="YYYY-MM-DD",
+                   help="map only the fixes from this local date")
+    p.add_argument("--run-gap", type=float, default=RUN_GAP_MIN,
+                   help=f"minutes of gap that separates one run from the next (default {RUN_GAP_MIN})")
     p.add_argument("--out", help="output HTML path (default: beside the first input)")
     p.add_argument("--no-open", action="store_true", help="don't auto-open the map")
     return p.parse_args()
 
 
 def run(args):
-    files = expand_inputs(args.paths)
-    if not files:
-        print("No KML/CSV inputs. Drop the 'WiGLE data' folder (or files) onto this "
-              "script, or pass paths on the command line.")
+    sqlite_path = args.track
+
+    # --list-runs: enumerate sessions in the backup and exit (no map)
+    if args.list_runs:
+        if not sqlite_path:
+            print('--list-runs needs a SQLite backup: pass --track "...\\WiGLE Database Backup.sqlite"')
+            return None
+        fixes, err = _load_fixes(sqlite_path)
+        if err:
+            print(f"couldn't read backup: {err}")
+            return None
+        runs = sessionize(fixes, args.run_gap * 60_000)
+        if not runs:
+            print("No timestamped fixes in that backup.")
+            return None
+        print(f"{len(runs)} run(s) in {os.path.basename(sqlite_path)} "
+              f"(split on >{args.run_gap:.0f} min gaps):\n")
+        for i, r in enumerate(runs, 1):
+            print(f"  [{i:>3}] {_fmt_run(r)}")
+        print("\nView one with:  --run N   (or)   --date YYYY-MM-DD")
         return None
-    print(f"reading {len(files)} file(s)...")
-    raw = []
-    for f in files:
-        n0 = len(raw)
-        raw.extend(parse_any(f))
-        print(f"  {os.path.basename(f)}: {len(raw) - n0:,} points")
-    # Drop invalid / null-island coordinates - a single (0,0) or out-of-range fix
-    # would otherwise stretch the map extent from Rio to the Atlantic.
-    points = [(la, lo) for (la, lo) in raw
-              if -90 <= la <= 90 and -180 <= lo <= 180 and not (la == 0 and lo == 0)]
-    dropped = len(raw) - len(points)
-    if dropped:
-        print(f"  dropped {dropped:,} invalid/zero coordinates")
+
+    # ---- choose the coverage source + track fixes ----
+    points, track_fixes, base_dir, tag = None, None, None, ""
+
+    if args.run or args.date:                       # single-run view (SQLite only)
+        if not sqlite_path:
+            print("--run/--date needs a SQLite backup via --track.")
+            return None
+        allfixes, err = _load_fixes(sqlite_path)
+        if err:
+            print(f"couldn't read backup: {err}")
+            return None
+        if args.date:
+            sel, tag, what = filter_by_date(allfixes, args.date), f"_{args.date}", f"date {args.date}"
+        else:
+            runs = sessionize(allfixes, args.run_gap * 60_000)
+            if not (1 <= args.run <= len(runs)):
+                print(f"--run {args.run} out of range (1..{len(runs)}). Try --list-runs.")
+                return None
+            sel, tag, what = runs[args.run - 1], f"_run{args.run}", f"run {args.run}"
+        if not sel:
+            print(f"No fixes for {what}.")
+            return None
+        if args.paths:
+            print("  (run mode: ignoring KML/CSV args - coverage comes from the SQLite session)")
+        print(f"{what}: {_fmt_run(sel)}")
+        points = [(la, lo) for (_, la, lo) in sel]
+        track_fixes = sel
+        base_dir = os.path.dirname(os.path.abspath(sqlite_path))
+
+    else:
+        files = expand_inputs(args.paths)
+        if files:                                   # coverage from KML/CSV (household/whole)
+            print(f"reading {len(files)} file(s)...")
+            raw = []
+            for f in files:
+                n0 = len(raw)
+                raw.extend(parse_any(f))
+                print(f"  {os.path.basename(f)}: {len(raw) - n0:,} points")
+            # Drop invalid/null-island coords - one (0,0) fix would stretch the map to the ocean.
+            points = [(la, lo) for (la, lo) in raw
+                      if -90 <= la <= 90 and -180 <= lo <= 180 and not (la == 0 and lo == 0)]
+            dd = len(raw) - len(points)
+            if dd:
+                print(f"  dropped {dd:,} invalid/zero coordinates")
+            base_dir = os.path.dirname(os.path.abspath(files[0]))
+            if sqlite_path:
+                print(f"reading track from {os.path.basename(sqlite_path)}...")
+                track_fixes, err = _load_fixes(sqlite_path)
+                if err:
+                    print(f"  !! couldn't read track ({err}); rendering without it")
+        elif sqlite_path:                           # entire-DB view straight from the backup
+            print(f"entire-DB view from {os.path.basename(sqlite_path)}...")
+            track_fixes, err = _load_fixes(sqlite_path)
+            if err:
+                print(f"couldn't read backup: {err}")
+                return None
+            points = [(la, lo) for (_, la, lo) in track_fixes]
+            base_dir = os.path.dirname(os.path.abspath(sqlite_path))
+        else:
+            print('No input. Pass KML/CSV path(s) and/or --track "<SQLite backup>".')
+            return None
+
     if not points:
-        print("No usable coordinates found in those files.")
+        print("No usable coordinates found.")
         return None
 
     mean_lat = sum(p[0] for p in points) / len(points)
@@ -441,24 +564,15 @@ def run(args):
     print(f"  {holes:,} holes + {edges:,} edges; rendering map...")
 
     track_segs = None
-    if args.track:
-        print(f"reading track from {os.path.basename(args.track)}...")
-        try:
-            fixes = parse_sqlite_track(args.track)
-            track_segs = build_track_segments(
-                fixes, args.track_gap * 60_000, TRACK_MIN_MOVE_M / EARTH_M_PER_DEG)
-            tpts = sum(len(s) for s in track_segs)
-            print(f"  {len(fixes):,} fixes -> {tpts:,} path points in {len(track_segs)} segment(s)")
-        except Exception as exc:
-            print(f"  !! couldn't read track ({exc}); map will render without it")
+    if track_fixes:
+        track_segs = build_track_segments(
+            track_fixes, args.track_gap * 60_000, TRACK_MIN_MOVE_M / EARTH_M_PER_DEG)
 
     out = args.out or os.path.join(
-        os.path.dirname(os.path.abspath(files[0])),
-        f"wigle_coverage_{datetime.date.today():%Y%m%d}.html")
+        base_dir or os.getcwd(), f"wigle_coverage{tag}_{datetime.date.today():%Y%m%d}.html")
     render_html(coverage, recs, dlat, dlon, args.min_obs, out, track_segments=track_segs)
 
-    print(f"\n  {len(points):,} points  ->  {len(covered):,} covered cells "
-          f"(~{args.cell_size:.0f} m)")
+    print(f"\n  {len(points):,} points  ->  {len(covered):,} covered cells (~{args.cell_size:.0f} m)")
     print(f"  recommendations: {holes} holes (skipped) + {edges} edges (frontier)")
     if track_segs:
         print(f"  track: {sum(len(s) for s in track_segs):,} points, {len(track_segs)} segment(s)")

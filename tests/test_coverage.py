@@ -94,5 +94,21 @@ class TestTrack(unittest.TestCase):
         self.assertEqual(wc.build_track_segments([(0, -22.97, -43.18)], 300000, 0.0), [])
 
 
+class TestSessionize(unittest.TestCase):
+    def test_splits_into_runs_on_gap(self):
+        # two clusters ~1h apart -> two runs (30-min gap threshold)
+        gap = 30 * 60_000
+        fixes = [(0, -22.97, -43.18), (60_000, -22.971, -43.181),
+                 (3_600_000, -22.98, -43.19), (3_660_000, -22.981, -43.191),
+                 (3_720_000, -22.982, -43.192)]
+        runs = wc.sessionize(fixes, gap)
+        self.assertEqual(len(runs), 2)
+        self.assertEqual([len(r) for r in runs], [2, 3])
+
+    def test_single_run_when_no_big_gap(self):
+        fixes = [(t * 60_000, -22.97, -43.18) for t in range(10)]  # 1-min steps, one session
+        self.assertEqual(len(wc.sessionize(fixes, 30 * 60_000)), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

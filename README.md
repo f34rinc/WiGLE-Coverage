@@ -28,8 +28,12 @@ python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 50 --min-obs 2 --ou
 | `--cell-size` | 50 | grid cell edge, metres (~half a block; below ~25 m just maps GPS scatter) |
 | `--min-obs` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
 | `--hole-threshold` | 5 | covered neighbours (of 8) for a cell to rank as a "hole" vs an "edge" |
-| `--track` | – | a WiGLE **SQLite backup** to draw your actual walked path (blue line) |
+| `--track` | – | a WiGLE **SQLite backup** — draws your path *and* powers the run views |
 | `--track-gap` | 5 | minutes between GPS fixes that starts a new path segment |
+| `--list-runs` | – | list the runs (sessions) in the backup and exit |
+| `--run` | – | map only run *N* (from `--list-runs`) — that session's coverage + path |
+| `--date` | – | map only the fixes from a local date (`YYYY-MM-DD`) |
+| `--run-gap` | 30 | minutes of gap that separates one run from the next |
 | `--out` | *beside first input* | output HTML path |
 | `--no-open` | off | don't auto-open the map |
 
@@ -41,11 +45,26 @@ python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 50 --min-obs 2 --ou
 - **Orange cells** = *edges* — blank cells touching your coverage: the natural
   frontier to expand into.
 
-**Your actual path.** Pass `--track "C:\...\WiGLE Database Backup"` and the map gains
-a toggle-able **blue line of where you really walked** — raw GPS fixes from the
+**Your actual path.** Pass `--track "C:\...\WiGLE Database Backup.sqlite"` and the map
+gains a toggle-able **blue line of where you really walked** — raw GPS fixes from the
 backup's `location` table, split into segments on time gaps (so separate walks don't
 join with a straight line). Cells come from the KML/CSV; the track from the SQLite.
-Lay it over the cells to see exactly which streets your coverage came from.
+Lay it over the cells to see exactly which streets your coverage came from. A
+bottom-left dropdown recolors the track line.
+
+**Historical runs vs a single run.** Because the SQLite backup carries timestamps
+(a KML doesn't), you can slice it by session:
+
+```
+python wigle_coverage.py --track "...\WiGLE Database Backup.sqlite" --list-runs
+#   [  1] 2026-09-06  18:42-20:15   93m    4,120 fixes
+#   [  2] 2026-09-13  16:02-17:48  106m    6,800 fixes
+python wigle_coverage.py --track "...\WiGLE Database Backup.sqlite" --run 2
+python wigle_coverage.py --track "...\WiGLE Database Backup.sqlite" --date 2026-09-13
+```
+
+With just `--track` and no run flag you get the **entire-DB view** — all your history
+at once (coverage *and* path straight from the backup, no KML needed).
 
 Each cell's popup gives its centre coordinate plus an **Open in OpenStreetMap** link,
 so one click drops you at that exact spot with full business/place names (the base
