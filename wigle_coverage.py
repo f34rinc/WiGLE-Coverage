@@ -11,10 +11,15 @@ by itself, is a full coverage+path map). It unions everything, builds the map, a
 opens it. Dragging the whole "WiGLE data" folder is the sweet spot - it auto-uses the
 KMLs for coverage and the newest .sqlite backup for the track.
 
+NO ARGS / MENU: run with nothing (or -i / --menu) for an interactive terminal menu
+to set options and pick a run. With no path given, the tool reads a "data" folder
+beside this script (./data) - drop your KML/CSV + .sqlite backup there once and just
+run it. Override the folder with --data DIR.
+
 CLI:
     python wigle_coverage.py "<dir or file(s)>" [--cell-size 50] [--min-obs 2]
                              [--hole-threshold 5] [--track "WiGLE Database Backup"]
-                             [--out map.html] [--no-open]
+                             [--data DIR] [-i] [--out map.html] [--no-open]
 
 YOUR ACTUAL PATH: pass --track pointing at a WiGLE SQLite backup and the map adds a
 toggle-able blue polyline of where you actually walked (raw GPS fixes from its
@@ -51,6 +56,9 @@ TRACK_GAP_MIN  = 5      # minutes; a larger gap between fixes starts a new track
 TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one (jitter)
 RUN_GAP_MIN    = 30     # minutes of quiet that separates one run/session from the next
 EARTH_M_PER_DEG = 111320.0
+# Default folder read when no path/--track is given: a "data" folder beside this script
+# (git-ignored). Drop your KML/CSV + .sqlite backup here and just run the tool.
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 # -----------------------------------------------------------------------------
 
 
@@ -471,14 +479,24 @@ def parse_args():
                    help="map only the fixes from this local date")
     p.add_argument("--run-gap", type=float, default=RUN_GAP_MIN,
                    help=f"minutes of gap that separates one run from the next (default {RUN_GAP_MIN})")
+    p.add_argument("--data", metavar="DIR",
+                   help=f"folder to read when no path is given (default: {DATA_DIR})")
+    p.add_argument("-i", "--menu", action="store_true",
+                   help="interactive menu to set options instead of passing flags")
     p.add_argument("--out", help="output HTML path (default: beside the first input)")
     p.add_argument("--no-open", action="store_true", help="don't auto-open the map")
     return p.parse_args()
 
 
 def run(args):
+    # Default to the ./data folder when nothing was passed.
+    paths = list(args.paths)
+    if not paths and not args.track:
+        d = getattr(args, "data", None) or DATA_DIR
+        if os.path.isdir(d):
+            paths = [d]
     # Gather inputs, then split: SQLite backups (positional or --track) vs KML/CSV.
-    inputs = expand_inputs(args.paths)
+    inputs = expand_inputs(paths)
     sqlite_files = [f for f in inputs if _is_sqlite(f)]
     cover_files = [f for f in inputs if f not in sqlite_files]
     sqlite_path = args.track
@@ -602,8 +620,118 @@ def run(args):
     return out
 
 
+def _detect_data(data_dir):
+    """(kml/csv files, sqlite backups) found in a folder."""
+    if not os.path.isdir(data_dir):
+        return [], []
+    inp = expand_inputs([data_dir])
+    sq = [f for f in inp if _is_sqlite(f)]
+    return [f for f in inp if f not in sq], sq
+
+
+def _menu_status(st):
+    kml, sq = _detect_data(st["data"])
+    print("\nwigle-coverage")
+    if kml or sq:
+        bits = []
+        if kml:
+            bits.append(f"{len(kml)} KML/CSV")
+        if sq:
+            bits.append(f"backup: {os.path.basename(max(sq, key=os.path.getmtime))}")
+        print(f"  data: {st['data']}   ({', '.join(bits)})")
+    else:
+        print(f"  data: {st['data']}   (empty - drop KML/CSV or a .sqlite backup here)")
+    mode = ("run %d" % st["run"] if st["mode"] == "run"
+            else "date %s" % st["date"] if st["mode"] == "date" else "entire-DB / union")
+    print(f"  cell {st['cell_size']:.0f} m  min-obs {st['min_obs']}  mode: {mode}")
+
+
+def _menu_help():
+    print("""  commands:
+    runs             list the runs (sessions) in the backup
+    run N            view just run N          date YYYY-MM-DD   view one date
+    all              entire-DB / union view (the default)
+    cell N           grid size in metres      min N             networks/cell to count
+    hole N           hole-vs-edge threshold   data <path>       read a different folder
+    go  (or Enter)   build + open the map     help              this list      q   quit""")
+
+
+def _menu_namespace(st, list_runs=False):
+    return argparse.Namespace(
+        paths=[st["data"]], track=None, data=None,
+        cell_size=st["cell_size"], min_obs=st["min_obs"], hole_threshold=st["hole_threshold"],
+        run_gap=st["run_gap"], track_gap=st["track_gap"], list_runs=list_runs,
+        run=st["run"] if st["mode"] == "run" else None,
+        date=st["date"] if st["mode"] == "date" else None,
+        out=None, no_open=True, menu=False)
+
+
+def interactive_menu(args):
+    st = {"data": args.data or DATA_DIR, "cell_size": args.cell_size, "min_obs": args.min_obs,
+          "hole_threshold": args.hole_threshold, "run_gap": args.run_gap,
+          "track_gap": args.track_gap, "mode": "all", "run": None, "date": None}
+    print("=" * 60)
+    _menu_status(st)
+    _menu_help()
+    while True:
+        try:
+            line = input("\n> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        cmd, _, arg = line.partition(" ")
+        cmd, arg = cmd.lower(), arg.strip().strip('"').strip("'")
+        try:
+            if cmd in ("q", "quit", "exit"):
+                break
+            elif cmd in ("", "go", "map", "open"):
+                out = run(_menu_namespace(st))
+                if out:
+                    try:
+                        webbrowser.open("file://" + os.path.abspath(out))
+                    except Exception:
+                        pass
+            elif cmd == "runs":
+                run(_menu_namespace(st, list_runs=True))
+            elif cmd == "all":
+                st["mode"], st["run"], st["date"] = "all", None, None
+                _menu_status(st)
+            elif cmd == "run" and arg:
+                st["mode"], st["run"], st["date"] = "run", int(arg), None
+                _menu_status(st)
+            elif cmd == "date" and arg:
+                st["mode"], st["date"], st["run"] = "date", arg, None
+                _menu_status(st)
+            elif cmd == "cell" and arg:
+                st["cell_size"] = float(arg)
+                _menu_status(st)
+            elif cmd == "min" and arg:
+                st["min_obs"] = int(arg)
+                _menu_status(st)
+            elif cmd == "hole" and arg:
+                st["hole_threshold"] = int(arg)
+                _menu_status(st)
+            elif cmd == "data" and arg:
+                st["data"] = arg
+                _menu_status(st)
+            elif cmd in ("help", "h", "?"):
+                _menu_help()
+            else:
+                print("  unknown command - type 'help'")
+        except ValueError:
+            print("  that option needs a number")
+
+
 def main():
     args = parse_args()
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)   # ensure the drop folder exists
+    except OSError:
+        pass
+    # No target and nothing to do (or -i) -> interactive menu.
+    if args.menu or not (args.paths or args.track or args.list_runs or args.run or args.date):
+        interactive_menu(args)
+        return
     out = run(args)
     if out and not args.no_open:
         try:

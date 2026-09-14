@@ -7,6 +7,23 @@ for planning the next wardrive so each outing lands on ground that's new to you.
 
 Output is a **self-contained local Leaflet map** (`.html`) you open in your browser.
 
+## Quick start (no arguments)
+
+Drop your KML/CSV exports and a `.sqlite` backup into the **`data/`** folder beside the
+script, then run it with **no arguments** for an interactive menu:
+
+```
+python wigle_coverage.py
+#   data: ./data   (6 KML/CSV, backup: WiGLE Database Backup.sqlite)
+#   cell 50 m  min-obs 2  mode: entire-DB / union
+#   > runs        # list your sessions
+#   > run 3       # pick one     > cell 75   # tweak
+#   > go          # build + open the map
+```
+
+`-i` / `--menu` forces the menu even with other flags; `--data DIR` points at a
+different folder. Everything below still works as one-shot CLI flags for scripting.
+
 ## Use it
 
 **Drag-and-drop (Windows):** drop one or more `.kml` / WiGLE `.csv` files — or the
