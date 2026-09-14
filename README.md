@@ -28,6 +28,8 @@ python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 50 --min-obs 2 --ou
 | `--cell-size` | 50 | grid cell edge, metres (~half a block; below ~25 m just maps GPS scatter) |
 | `--min-obs` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
 | `--hole-threshold` | 5 | covered neighbours (of 8) for a cell to rank as a "hole" vs an "edge" |
+| `--track` | – | a WiGLE **SQLite backup** to draw your actual walked path (blue line) |
+| `--track-gap` | 5 | minutes between GPS fixes that starts a new path segment |
 | `--out` | *beside first input* | output HTML path |
 | `--no-open` | off | don't auto-open the map |
 
@@ -38,6 +40,12 @@ python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 50 --min-obs 2 --ou
   walked around but not through.
 - **Orange cells** = *edges* — blank cells touching your coverage: the natural
   frontier to expand into.
+
+**Your actual path.** Pass `--track "C:\...\WiGLE Database Backup"` and the map gains
+a toggle-able **blue line of where you really walked** — raw GPS fixes from the
+backup's `location` table, split into segments on time gaps (so separate walks don't
+join with a straight line). Cells come from the KML/CSV; the track from the SQLite.
+Lay it over the cells to see exactly which streets your coverage came from.
 
 Each cell's popup gives its centre coordinate plus an **Open in OpenStreetMap** link,
 so one click drops you at that exact spot with full business/place names (the base

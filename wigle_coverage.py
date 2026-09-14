@@ -13,7 +13,13 @@ spot; a single run-KML just maps that one run.
 
 CLI:
     python wigle_coverage.py "<dir or file(s)>" [--cell-size 50] [--min-obs 2]
-                             [--hole-threshold 5] [--out map.html] [--no-open]
+                             [--hole-threshold 5] [--track "WiGLE Database Backup"]
+                             [--out map.html] [--no-open]
+
+YOUR ACTUAL PATH: pass --track pointing at a WiGLE SQLite backup and the map adds a
+toggle-able blue polyline of where you actually walked (raw GPS fixes from its
+`location` table, split into segments on time gaps). The cells come from the KML/CSV;
+the track from the SQLite. (Track is CLI-only - drag-drop just does coverage.)
 
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
 git-ignored. Nothing here is uploaded or published.
@@ -34,6 +40,8 @@ import webbrowser
 CELL_SIZE_M   = 50      # grid cell edge in metres (~half a block; near the GPS floor)
 MIN_OBS       = 2       # APs in a cell before it counts as "covered" (filters strays)
 HOLE_THRESHOLD = 5      # covered 8-neighbours at/above this => "hole", else "edge"
+TRACK_GAP_MIN  = 5      # minutes; a larger gap between fixes starts a new track segment
+TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one (jitter)
 EARTH_M_PER_DEG = 111320.0
 # -----------------------------------------------------------------------------
 
@@ -163,6 +171,44 @@ def expand_inputs(paths):
     return uniq
 
 
+# ---- track (your actual path, from the WiGLE SQLite backup) -----------------
+def parse_sqlite_track(path):
+    """Timestamped GPS fixes from a WiGLE SQLite backup's `location` table, sorted
+    by time (epoch ms). Returns [(time_ms, lat, lon), ...]. Opened read-only; skips
+    time=0 / null-island / out-of-range rows."""
+    import sqlite3
+    import urllib.request
+    uri = "file:" + urllib.request.pathname2url(os.path.abspath(path)) + "?mode=ro"
+    con = sqlite3.connect(uri, uri=True)
+    try:
+        rows = con.execute(
+            "SELECT time, lat, lon FROM location "
+            "WHERE time > 0 AND lat BETWEEN -90 AND 90 AND lon BETWEEN -180 AND 180 "
+            "AND NOT (lat = 0 AND lon = 0) ORDER BY time").fetchall()
+    finally:
+        con.close()
+    return [(int(t), float(la), float(lo)) for (t, la, lo) in rows]
+
+
+def build_track_segments(rows, gap_ms, min_move_deg):
+    """Split time-sorted (time, lat, lon) fixes into polyline segments: break on a
+    time gap (so separate walks don't join with a straight line) and drop fixes that
+    barely moved (GPS jitter). Returns [[[lat,lon],...], ...]."""
+    segs, cur, last_t, last = [], [], None, None
+    for (t, la, lo) in rows:
+        if last_t is not None and t - last_t > gap_ms:
+            if len(cur) >= 2:
+                segs.append(cur)
+            cur, last = [], None
+        if last is None or abs(la - last[0]) >= min_move_deg or abs(lo - last[1]) >= min_move_deg:
+            cur.append([la, lo])
+            last = (la, lo)
+        last_t = t
+    if len(cur) >= 2:
+        segs.append(cur)
+    return segs
+
+
 # ---- HTML rendering ---------------------------------------------------------
 def _cov_color(count):
     if count >= 30:
@@ -204,7 +250,7 @@ const baseHybrid = L.layerGroup([esri('World_Imagery', 19),
                                  esri('Reference/World_Transportation', 19),
                                  esri('Reference/World_Boundaries_and_Places', 19)]);
 baseStreet.addTo(map);
-L.control.layers({'Streets (Esri)': baseStreet, 'Light gray': baseGray,
+const layerCtl = L.control.layers({'Streets (Esri)': baseStreet, 'Light gray': baseGray,
                   'Satellite': baseSat, 'Satellite + labels': baseHybrid},
   null, {position:'topright'}).addTo(map);
 
@@ -231,6 +277,14 @@ D.recs.forEach(([r,c,label,nb])=>{
      +nb+' covered neighbours<br>'+maplink(ct[0],ct[1])).addTo(map);
 });
 
+// your actual path (from the SQLite location table), split into time-gap segments
+if (D.track && D.track.length){
+  const trk = L.layerGroup(D.track.map(seg =>
+    L.polyline(seg, {color:'#2563eb', weight:2, opacity:.8})));
+  trk.addTo(map);
+  layerCtl.addOverlay(trk, 'Your track');
+}
+
 map.fitBounds(D.fit);
 
 const lg = L.control({position:'bottomright'});
@@ -239,6 +293,7 @@ lg.onAdd = function(){ const d=L.DomUtil.create('div','legend');
    + '<div><span class="sw" style="background:#0b525b"></span>covered (dense &rarr; light)</div>'
    + '<div><span class="sw" style="background:#dc2626"></span>hole &ndash; skipped street</div>'
    + '<div><span class="sw" style="background:#f59e0b"></span>edge &ndash; walk outward</div>'
+   + (D.track && D.track.length ? '<div><span class="sw" style="background:#2563eb"></span>your track</div>' : '')
    + '<div style="margin-top:4px;color:#555">'+D.covered.length+' covered cells &middot; '
    + D.recs.length+' suggestions</div>';
   return d; };
@@ -246,7 +301,7 @@ lg.addTo(map);
 </script></body></html>"""
 
 
-def render_html(coverage, recs, dlat, dlon, min_obs, out_path):
+def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=None):
     covered = covered_cells(coverage, min_obs)
     cov_list = [[r, c, coverage[(r, c)]] for (r, c) in covered]
     rec_list = [[x["cell"][0], x["cell"][1], x["label"], x["covered_neighbors"]] for x in recs]
@@ -255,7 +310,8 @@ def render_html(coverage, recs, dlat, dlon, min_obs, out_path):
     cols = [c for _, c in all_cells] or [0]
     fit = [[min(rows) * dlat, min(cols) * dlon],
            [(max(rows) + 1) * dlat, (max(cols) + 1) * dlon]]
-    data = {"dlat": dlat, "dlon": dlon, "covered": cov_list, "recs": rec_list, "fit": fit}
+    data = {"dlat": dlat, "dlon": dlon, "covered": cov_list, "recs": rec_list,
+            "fit": fit, "track": track_segments or []}
     title = "WiGLE coverage &amp; frontier"
     html = _HTML.replace("__DATA__", json.dumps(data)).replace("__TITLE__", title)
     with open(out_path, "w", encoding="utf-8") as fh:
@@ -323,6 +379,9 @@ def parse_args():
                    help=f"networks in a cell before it counts as covered (default {MIN_OBS})")
     p.add_argument("--hole-threshold", type=int, default=HOLE_THRESHOLD,
                    help=f"covered neighbours for a 'hole' vs 'edge' (default {HOLE_THRESHOLD})")
+    p.add_argument("--track", help="WiGLE SQLite backup to draw your actual walked path from")
+    p.add_argument("--track-gap", type=float, default=TRACK_GAP_MIN,
+                   help=f"minutes between fixes that starts a new track segment (default {TRACK_GAP_MIN})")
     p.add_argument("--out", help="output HTML path (default: beside the first input)")
     p.add_argument("--no-open", action="store_true", help="don't auto-open the map")
     return p.parse_args()
@@ -362,14 +421,28 @@ def run(args):
     edges = len(recs) - holes
     print(f"  {holes:,} holes + {edges:,} edges; rendering map...")
 
+    track_segs = None
+    if args.track:
+        print(f"reading track from {os.path.basename(args.track)}...")
+        try:
+            fixes = parse_sqlite_track(args.track)
+            track_segs = build_track_segments(
+                fixes, args.track_gap * 60_000, TRACK_MIN_MOVE_M / EARTH_M_PER_DEG)
+            tpts = sum(len(s) for s in track_segs)
+            print(f"  {len(fixes):,} fixes -> {tpts:,} path points in {len(track_segs)} segment(s)")
+        except Exception as exc:
+            print(f"  !! couldn't read track ({exc}); map will render without it")
+
     out = args.out or os.path.join(
         os.path.dirname(os.path.abspath(files[0])),
         f"wigle_coverage_{datetime.date.today():%Y%m%d}.html")
-    render_html(coverage, recs, dlat, dlon, args.min_obs, out)
+    render_html(coverage, recs, dlat, dlon, args.min_obs, out, track_segments=track_segs)
 
     print(f"\n  {len(points):,} points  ->  {len(covered):,} covered cells "
           f"(~{args.cell_size:.0f} m)")
     print(f"  recommendations: {holes} holes (skipped) + {edges} edges (frontier)")
+    if track_segs:
+        print(f"  track: {sum(len(s) for s in track_segs):,} points, {len(track_segs)} segment(s)")
     print(f"  map: {out}")
     return out
 

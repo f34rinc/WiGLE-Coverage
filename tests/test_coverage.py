@@ -73,5 +73,26 @@ class TestRecommend(unittest.TestCase):
         self.assertEqual(wc.recommend({(0, 0): 1}, min_obs=2, hole_threshold=5), [])
 
 
+class TestTrack(unittest.TestCase):
+    def test_gap_splits_segments(self):
+        # two clusters ~11 min apart -> two segments (gap threshold 5 min)
+        rows = [(0, -22.97, -43.18), (1000, -22.9702, -43.1802), (2000, -22.9704, -43.1804),
+                (700000, -22.98, -43.19), (701000, -22.9802, -43.1902)]
+        segs = wc.build_track_segments(rows, gap_ms=300000, min_move_deg=0.0)
+        self.assertEqual(len(segs), 2)
+        self.assertEqual([len(s) for s in segs], [3, 2])
+
+    def test_jitter_decimated(self):
+        # a barely-moving fix between two real ones is dropped
+        rows = [(0, -22.97, -43.18), (1000, -22.970001, -43.180001), (2000, -22.9705, -43.1805)]
+        segs = wc.build_track_segments(rows, gap_ms=300000, min_move_deg=0.0001)
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(len(segs[0]), 2)   # the sub-threshold jitter point is gone
+
+    def test_lone_segment_dropped(self):
+        # a single isolated fix can't form a line
+        self.assertEqual(wc.build_track_segments([(0, -22.97, -43.18)], 300000, 0.0), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
