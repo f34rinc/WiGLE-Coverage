@@ -131,6 +131,23 @@ An **"OSM smooth (Stadia)"** option then appears in the layer switcher (and beco
 default). **No key → the option simply isn't shown.** `map_key.txt` is git-ignored — it's
 *your* key, never committed; you don't use anyone else's, and no one uses yours.
 
+### Target the holes: name the businesses (`--pois`)
+
+Add `--pois` (or toggle `pois` in the menu) and the tool asks **OpenStreetMap** (via the
+Overpass API) what named businesses sit inside each *hole* — turning "empty cell here"
+into a concrete hit-list for your next run:
+
+```
+python wigle_coverage.py --pois
+#   > HOLE @ -22.970, -43.180  (4 targets): Padaria São José · Bar do Zé · Mercado · Farmácia
+```
+
+The businesses show up in each hole's **popup** and in a `*_targets.txt` file beside the map
+(hole coordinate + OpenStreetMap link + each place, most-loaded holes first). It's **one
+polite Overpass query** per run (opt-in, off by default), and POIs are © OpenStreetMap
+contributors. OSM POI coverage varies by region — dense in much of Europe/North America,
+thinner elsewhere — so treat it as a "known targets" list, not an exhaustive one.
+
 ## Privacy
 
 Your WiGLE exports and the generated map carry **real GPS coordinates**. They stay

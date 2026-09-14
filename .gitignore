@@ -6,6 +6,7 @@
 *.html
 *.sqlite
 *.db
+*_targets.txt
 data/
 out/
 

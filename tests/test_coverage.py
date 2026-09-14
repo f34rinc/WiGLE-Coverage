@@ -110,5 +110,18 @@ class TestSessionize(unittest.TestCase):
         self.assertEqual(len(wc.sessionize(fixes, 30 * 60_000)), 1)
 
 
+class TestPOIs(unittest.TestCase):
+    def test_assign_pois_to_holes(self):
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        hole = wc.cell_of(-22.9700, -43.1800, dlat, dlon)
+        other = wc.cell_of(-22.9900, -43.2000, dlat, dlon)   # not a hole
+        pois = [("Padaria", "bakery", -22.97001, -43.18001),   # inside the hole cell
+                ("FarAway", "bar", -22.99001, -43.20001)]      # outside any hole
+        got = wc.assign_pois_to_holes(pois, [hole], dlat, dlon)
+        self.assertIn(hole, got)
+        self.assertEqual([p[0] for p in got[hole]], ["Padaria"])
+        self.assertNotIn(other, got)                            # non-hole POI dropped
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

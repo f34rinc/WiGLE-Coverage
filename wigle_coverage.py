@@ -33,6 +33,10 @@ HISTORICAL RUNS (SQLite only, since a KML has no timestamps):
     --date 2026-09-13          map just that local date
     (with only --track and no run flag: the ENTIRE-DB view - all your history at once)
 
+TARGETS (--pois): name the businesses inside each 'hole' via OpenStreetMap (Overpass)
+so you get a hit-list of specific places to aim a future run at - shown in the hole
+popups and written to a <map>_targets.txt. OSM POI coverage varies by region.
+
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
 git-ignored. Nothing here is uploaded or published.
 
@@ -56,6 +60,9 @@ TRACK_GAP_MIN  = 5      # minutes; a larger gap between fixes starts a new track
 TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one (jitter)
 RUN_GAP_MIN    = 30     # minutes of quiet that separates one run/session from the next
 EARTH_M_PER_DEG = 111320.0
+# Overpass (OpenStreetMap) - names businesses/POIs inside the "hole" cells (--pois)
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+POI_KEYS = ("shop", "amenity", "office", "tourism", "leisure", "craft")
 # Default folder read when no path/--track is given: a "data" folder beside this script
 # (git-ignored). Drop your KML/CSV + .sqlite backup here and just run the tool.
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
@@ -330,6 +337,68 @@ def _load_fixes(path):
         return None, str(exc)
 
 
+# ---- POIs (name the businesses in each hole, via OpenStreetMap / Overpass) ----
+def fetch_pois(south, west, north, east, timeout=60):
+    """One Overpass query for named POIs (shops/amenities/...) in a bbox. Returns
+    [(name, category, lat, lon), ...]. Raises on failure (caller degrades)."""
+    import urllib.request
+    import urllib.parse
+    parts = "".join(f'nwr["name"]["{k}"]({south},{west},{north},{east});' for k in POI_KEYS)
+    query = f"[out:json][timeout:{int(timeout)}];({parts});out center tags;"
+    req = urllib.request.Request(
+        OVERPASS_URL, data=urllib.parse.urlencode({"data": query}).encode(),
+        headers={"User-Agent": "wigle-coverage (personal wardrive planner; stdlib urllib)"})
+    with urllib.request.urlopen(req, timeout=timeout + 15) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    out = []
+    for el in data.get("elements", []):
+        tags = el.get("tags", {})
+        name = tags.get("name")
+        if not name:
+            continue
+        cat = next((tags[k] for k in POI_KEYS if k in tags), "")
+        lat, lon = el.get("lat"), el.get("lon")
+        if lat is None:                       # way/relation -> its computed center
+            c = el.get("center") or {}
+            lat, lon = c.get("lat"), c.get("lon")
+        if lat is None:
+            continue
+        out.append((name, cat, float(lat), float(lon)))
+    return out
+
+
+def assign_pois_to_holes(pois, hole_cells, dlat, dlon):
+    """Bucket POIs into the hole cells they fall in. Returns {(row,col): [poi, ...]}."""
+    holes = set(hole_cells)
+    out = {}
+    for poi in pois:
+        cell = cell_of(poi[2], poi[3], dlat, dlon)
+        if cell in holes:
+            out.setdefault(cell, []).append(poi)
+    return out
+
+
+def write_targets(path, recs, poi_by_hole, dlat, dlon):
+    """Write a field target list: each hole with named businesses, most-loaded first."""
+    holes = [(tuple(r["cell"]), poi_by_hole.get(tuple(r["cell"]), []))
+             for r in recs if r["label"] == "hole"]
+    holes = sorted([(c, ps) for c, ps in holes if ps], key=lambda x: -len(x[1]))
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("# wigle-coverage targets - named businesses inside your coverage 'holes'\n")
+        fh.write(f"# {datetime.date.today():%Y-%m-%d} | POIs (c) OpenStreetMap contributors (ODbL)\n\n")
+        if not holes:
+            fh.write("(no named POIs found in any hole)\n")
+            return
+        for cell, ps in holes:
+            latc, lonc = (cell[0] + 0.5) * dlat, (cell[1] + 0.5) * dlon
+            fh.write(f"HOLE {latc:.5f}, {lonc:.5f}  ({len(ps)} target(s))\n")
+            fh.write(f"  https://www.openstreetmap.org/?mlat={latc:.5f}&mlon={lonc:.5f}"
+                     f"#map=18/{latc:.5f}/{lonc:.5f}\n")
+            for name, cat, la, lo in sorted(ps, key=lambda p: p[0].lower()):
+                fh.write(f"    - {name}  [{cat}]  ({la:.5f}, {lo:.5f})\n")
+            fh.write("\n")
+
+
 # ---- HTML rendering ---------------------------------------------------------
 def _cov_color(count):
     if count >= 30:
@@ -401,11 +470,13 @@ D.covered.forEach(([r,c,n])=>{
 });
 // recommendations (where to go next)
 const RC = {hole:'#dc2626', edge:'#f59e0b'};
-D.recs.forEach(([r,c,label,nb])=>{
+D.recs.forEach(([r,c,label,nb,pois])=>{
   const b=bounds(r,c), ct=center(b);
+  let html='<b>'+(label==='hole'?'Hole (skipped)':'Edge (frontier)')+'</b><br>'
+     +nb+' covered neighbours<br>'+maplink(ct[0],ct[1]);
+  if (pois && pois.length) html += '<br><b>targets:</b> '+pois.join(', ');
   L.rectangle(b, {color:RC[label], weight:2, fillColor:RC[label], fillOpacity:.35})
-   .bindPopup('<b>'+(label==='hole'?'Hole (skipped)':'Edge (frontier)')+'</b><br>'
-     +nb+' covered neighbours<br>'+maplink(ct[0],ct[1])).addTo(map);
+   .bindPopup(html).addTo(map);
 });
 
 // your actual path (from the SQLite location table), split into time-gap segments
@@ -451,10 +522,13 @@ lg.addTo(map);
 </script></body></html>"""
 
 
-def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=None, map_key=None):
+def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=None,
+                map_key=None, poi_by_hole=None):
+    poi_by_hole = poi_by_hole or {}
     covered = covered_cells(coverage, min_obs)
     cov_list = [[r, c, coverage[(r, c)]] for (r, c) in covered]
-    rec_list = [[x["cell"][0], x["cell"][1], x["label"], x["covered_neighbors"]] for x in recs]
+    rec_list = [[x["cell"][0], x["cell"][1], x["label"], x["covered_neighbors"],
+                 [p[0] for p in poi_by_hole.get(tuple(x["cell"]), [])]] for x in recs]
     all_cells = list(covered) + [x["cell"] for x in recs]
     rows = [r for r, _ in all_cells] or [0]
     cols = [c for _, c in all_cells] or [0]
@@ -545,6 +619,8 @@ def parse_args():
     g.add_argument("--date", metavar="YYYY-MM-DD", help="map only the fixes from this local date")
     g.add_argument("--run-gap", type=float, default=RUN_GAP_MIN, metavar="MIN",
                    help=f"minutes of gap that separates one run from the next (default {RUN_GAP_MIN})")
+    g.add_argument("--pois", action="store_true",
+                   help="name the businesses (OpenStreetMap) inside each hole -> target list + popups")
 
     g = p.add_argument_group("grid + track tuning")
     g.add_argument("--cell-size", type=float, default=CELL_SIZE_M, metavar="M",
@@ -686,16 +762,38 @@ def run(args):
         track_segs = build_track_segments(
             track_fixes, args.track_gap * 60_000, TRACK_MIN_MOVE_M / EARTH_M_PER_DEG)
 
+    poi_by_hole = {}
+    if getattr(args, "pois", False):
+        hole_cells = [tuple(r["cell"]) for r in recs if r["label"] == "hole"]
+        if not hole_cells:
+            print("no holes to look up businesses for.")
+        else:
+            rs = [c[0] for c in hole_cells]
+            cs = [c[1] for c in hole_cells]
+            print(f"querying OpenStreetMap (Overpass) for businesses in {len(hole_cells)} holes...")
+            try:
+                pois = fetch_pois(min(rs) * dlat, min(cs) * dlon,
+                                  (max(rs) + 1) * dlat, (max(cs) + 1) * dlon)
+                poi_by_hole = assign_pois_to_holes(pois, hole_cells, dlat, dlon)
+                n = sum(len(v) for v in poi_by_hole.values())
+                print(f"  {n} named POIs across {len(poi_by_hole)} holes (OSM/Overpass)")
+            except Exception as exc:
+                print(f"  !! Overpass query failed ({exc}); rendering without targets")
+
     out = args.out or os.path.join(
         base_dir or os.getcwd(), f"wigle_coverage{tag}_{datetime.date.today():%Y%m%d}.html")
     render_html(coverage, recs, dlat, dlon, args.min_obs, out,
-                track_segments=track_segs, map_key=read_map_key())
+                track_segments=track_segs, map_key=read_map_key(), poi_by_hole=poi_by_hole)
 
     print(_rule("="))
     print(f"  {len(points):,} points  ->  {C.b}{len(covered):,}{C.reset} covered cells (~{args.cell_size:.0f} m)")
     print(f"  recommend: {C.red}{holes} holes{C.reset} (skipped) + {C.yellow}{edges} edges{C.reset} (frontier)")
     if track_segs:
         print(f"  track: {sum(len(s) for s in track_segs):,} points in {len(track_segs)} segment(s)")
+    if poi_by_hole:
+        tpath = os.path.splitext(out)[0] + "_targets.txt"
+        write_targets(tpath, recs, poi_by_hole, dlat, dlon)
+        print(f"  targets: {tpath}")
     print(f"  {C.green}map:{C.reset} {out}")
     print(_rule("="))
     return out
@@ -730,7 +828,7 @@ def _menu_status(st):
     print(f"  {b}data {r} | {st['data']}")
     print(f"  {b}found{r} | {found}")
     print(f"  {b}grid {r} | cell {g}{st['cell_size']:.0f} m{r} | min-obs {st['min_obs']} | hole {st['hole_threshold']}")
-    print(f"  {b}mode {r} | {g}{mode}{r}")
+    print(f"  {b}mode {r} | {g}{mode}{r}  |  pois {'on' if st.get('pois') else 'off'}")
 
 
 def _menu_help():
@@ -742,6 +840,7 @@ def _menu_help():
     print(_rule(label="tune"))
     print(f"  {y}cell{r} N         grid size (m)   {y}min{r} N   min obs   {y}hole{r} N   hole threshold")
     print(f"  {y}data{r} <path>    read a different folder")
+    print(f"  {y}pois{r}           toggle naming businesses in holes via OpenStreetMap")
     print(_rule(label="go"))
     print(f"  {y}go{r} (or Enter)  build + open the map    {y}help{r}   commands    {y}q{r}   quit")
     print(_rule("="))
@@ -754,13 +853,14 @@ def _menu_namespace(st, list_runs=False):
         run_gap=st["run_gap"], track_gap=st["track_gap"], list_runs=list_runs,
         run=st["run"] if st["mode"] == "run" else None,
         date=st["date"] if st["mode"] == "date" else None,
-        out=None, no_open=True, menu=False)
+        pois=st.get("pois", False), out=None, no_open=True, menu=False)
 
 
 def interactive_menu(args):
     st = {"data": args.data or DATA_DIR, "cell_size": args.cell_size, "min_obs": args.min_obs,
           "hole_threshold": args.hole_threshold, "run_gap": args.run_gap,
-          "track_gap": args.track_gap, "mode": "all", "run": None, "date": None}
+          "track_gap": args.track_gap, "mode": "all", "run": None, "date": None,
+          "pois": getattr(args, "pois", False)}
     _menu_status(st)
     _menu_help()
     while True:
@@ -803,6 +903,9 @@ def interactive_menu(args):
                 _menu_status(st)
             elif cmd == "data" and arg:
                 st["data"] = arg
+                _menu_status(st)
+            elif cmd == "pois":
+                st["pois"] = not st.get("pois", False)
                 _menu_status(st)
             elif cmd in ("help", "h", "?"):
                 _menu_help()
