@@ -830,7 +830,7 @@ _TARGETS_DOC = """<!doctype html>
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
        font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-  .wrap{max-width:1000px;margin:0 auto;padding:22px 16px 60px}
+  .wrap{max-width:1240px;margin:0 auto;padding:22px 16px 60px}
   header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;
              border-bottom:3px solid var(--teal);padding-bottom:12px;margin-bottom:6px}
   h1{font-size:1.5rem;margin:0;letter-spacing:.2px}
@@ -843,7 +843,7 @@ _TARGETS_DOC = """<!doctype html>
   .zone h2{font-size:1.05rem;margin:0;color:var(--teal);letter-spacing:.2px}
   .zone .zc{color:var(--muted);font-size:.8rem}
   .zone::after{content:"";flex:1;border-bottom:1px solid var(--line);align-self:center}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}
   article.hole{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--hole);
                border-radius:9px;padding:12px 14px;break-inside:avoid}
   article.hole > h2{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:.98rem}
@@ -852,16 +852,17 @@ _TARGETS_DOC = """<!doctype html>
   .coord{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.86rem}
   .osm{margin-left:auto;color:var(--link);text-decoration:none;font-size:.82rem;white-space:nowrap}
   .osm:hover{text-decoration:underline}
-  ul.pois{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
-  ul.pois li{display:flex;align-items:baseline;gap:8px;padding:3px 2px}
-  ul.pois li label{display:flex;align-items:baseline;gap:8px;cursor:pointer;flex:1;min-width:0}
-  ul.pois li input{margin:0;transform:translateY(1px)}
-  .name{font-weight:500}
-  .addr{color:var(--muted);font-size:.82rem}
-  .addr.none{font-style:italic;opacity:.8}
-  .cat{color:var(--muted);font-size:.78rem;background:var(--chip);
+  ul.pois{list-style:none;margin:0;padding:0}
+  ul.pois li{padding:5px 2px;border-top:1px solid var(--line)}
+  ul.pois li:first-child{border-top:none}
+  label.row{display:flex;align-items:baseline;gap:8px;cursor:pointer}
+  label.row input{margin:0;transform:translateY(1px);flex:none}
+  .name{font-weight:500;flex:1;min-width:0}                 /* long names wrap; chip stays right */
+  .cat{color:var(--muted);font-size:.76rem;background:var(--chip);flex:none;
        border-radius:5px;padding:1px 7px;white-space:nowrap}
-  li.more{color:var(--muted);font-size:.8rem;font-style:italic;padding:3px 2px}
+  .addr{color:var(--muted);font-size:.82rem;padding-left:22px;margin-top:1px}  /* own line, indented */
+  .addr.none{font-style:italic;opacity:.8}
+  li.more{color:var(--muted);font-size:.8rem;font-style:italic;padding:5px 2px;border-top:1px solid var(--line)}
   .empty{color:var(--muted);background:var(--card);border:1px dashed var(--line);
          border-radius:9px;padding:24px;text-align:center}
   footer{color:var(--muted);font-size:.8rem;margin-top:26px;border-top:1px solid var(--line);padding-top:10px}
@@ -886,11 +887,11 @@ __CARDS__
 
 def _poi_li(p):
     addr = poi_address(p)
-    addr_html = (f'<span class="addr">&mdash; {_esc(addr)}</span>' if addr
-                 else '<span class="addr none">no address</span>')
-    return (f'<li><label><input type="checkbox">'
-            f'<span class="name">{_esc(p.name)}</span>{addr_html}</label>'
-            f'<span class="cat">{_esc(p.cat) or "&nbsp;"}</span></li>')
+    addr_html = (f'<div class="addr">{_esc(addr)}</div>' if addr
+                 else '<div class="addr none">no address</div>')
+    return (f'<li><label class="row"><input type="checkbox">'
+            f'<span class="name">{_esc(p.name)}</span>'
+            f'<span class="cat">{_esc(p.cat) or "&nbsp;"}</span></label>{addr_html}</li>')
 
 
 def render_targets_html(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None,
@@ -971,6 +972,9 @@ __LEAFLET_JS__
   .targets .tlist li:hover{background:#f3f7f7}
   .targets .tn{display:inline-block;min-width:18px;text-align:center;background:#dc2626;color:#fff;
                border-radius:999px;font-size:11px;font-weight:700;padding:0 5px;margin-right:4px}
+  .leaflet-popup-content .ptargets{margin:3px 0 0;padding-left:20px}
+  .leaflet-popup-content .ptargets li{margin:2px 0;line-height:1.3}
+  .leaflet-popup-content b{color:#0b525b}
 </style></head><body><div id="map"></div>
 <script>
 const D = __DATA__;
@@ -1027,11 +1031,12 @@ D.recs.forEach(([r,c,label,nb,pois,more])=>{
   let html='<b>'+(label==='hole'?'Hole (skipped)':'Edge (frontier)')+'</b><br>'
      +nb+' covered neighbours<br>'+maplink(ct[0],ct[1]);
   if (pois && pois.length){
-    html += '<br><b>targets:</b> '+pois.map(escapeHtml).join(', ');
-    if (more) html += ' <i>+'+more+' more</i>';
+    html += '<br><b>targets:</b><ol class="ptargets">'
+          + pois.map(n => '<li>'+escapeHtml(n)+'</li>').join('') + '</ol>';
+    if (more) html += '<i>+'+more+' more</i>';
   }
   const rect = L.rectangle(b, {color:RC[label], weight:2, fillColor:RC[label], fillOpacity:.35})
-   .bindPopup(html).addTo(map);
+   .bindPopup(html, {maxWidth:340}).addTo(map);
   if (label==='hole' && pois && pois.length)
     targetHoles.push({center:ct, layer:rect, names:pois, more:more});
 });
@@ -1047,7 +1052,7 @@ if (targetHoles.length){
       : '';
     const rows = targetHoles.map((h,i)=>
       '<li data-i="'+i+'"><span class="tn">'+h.names.length+'</span>'
-      + h.names.map(escapeHtml).join(', ')
+      + h.names.map(escapeHtml).join(' &middot; ')
       + (h.more ? ' <i>+'+h.more+' more</i>' : '')+'</li>').join('');
     d.innerHTML = '<button class="tcol" title="collapse">&#8211;</button>'
       + '<b>&#127919; Targets ('+targetHoles.length+')</b>'+doc
