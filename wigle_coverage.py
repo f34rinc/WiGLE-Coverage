@@ -151,6 +151,15 @@ def _rule(char="=", label=""):
         head = f"-- {label} "
         return C.dim + head + "-" * max(0, _RULE_W - len(head)) + C.reset
     return C.dim + char * _RULE_W + C.reset
+
+
+def _fmt_secs(s):
+    """Human elapsed time: '0.8s', '42s', or '3m 05s'."""
+    if s < 10:
+        return f"{s:.1f}s"
+    if s < 60:
+        return f"{s:.0f}s"
+    return f"{int(s // 60)}m {int(s % 60):02d}s"
 # -----------------------------------------------------------------------------
 
 
@@ -1070,6 +1079,8 @@ def parse_args():
 
 
 def run(args):
+    t_start = time.perf_counter()      # wall-clock: start -> .html generated
+    poi_secs = 0.0                     # time spent in the OSM/Overpass lookup (usually the bulk)
     # Default to the ./data folder when nothing was passed.
     paths = list(args.paths)
     if not paths and not args.track:
@@ -1209,10 +1220,15 @@ def run(args):
                                  f"{(C.red + str(st['failed']) + ' failed' + C.reset) if st['failed'] else '0 failed'}   ")
                 sys.stdout.flush()
 
+            t_poi = time.perf_counter()
             pois, stats = fetch_pois_tiled(
                 hole_cells, dlat, dlon, refresh=getattr(args, "refresh_pois", False),
                 on_progress=_prog)
+            poi_secs = time.perf_counter() - t_poi
             sys.stdout.write("\n")
+            print(f"  OSM lookup: {_fmt_secs(poi_secs)}  "
+                  f"{C.dim}({stats['queried']} queried, {stats['hits']} cached, "
+                  f"{stats['failed']} failed){C.reset}")
             if stats["failed"] and not pois:
                 print(f"  !! all {stats['failed']} tile(s) failed (Overpass busy?); rendering "
                       f"without targets. Re-run later to fill it in.")
@@ -1256,6 +1272,10 @@ def run(args):
         print(f"  targets: {tpath_txt}")
         print(f"           {tpath_html}  {C.dim}(printable hit-list){C.reset}")
     print(f"  {C.green}map:{C.reset} {out}")
+    total = time.perf_counter() - t_start
+    other = max(0.0, total - poi_secs)
+    breakdown = f"  {C.dim}({_fmt_secs(poi_secs)} OSM lookup + {_fmt_secs(other)} rest){C.reset}" if poi_secs else ""
+    print(f"  {C.b}time:{C.reset} {_fmt_secs(total)} start -> map{breakdown}")
     print(_rule("="))
     return out
 

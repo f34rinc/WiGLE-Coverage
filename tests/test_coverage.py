@@ -357,6 +357,13 @@ class TestTiledFetch(unittest.TestCase):
         self.assertEqual([p.name for p in pois], ["Now"])
 
 
+class TestFmtSecs(unittest.TestCase):
+    def test_formats_elapsed(self):
+        self.assertEqual(wc._fmt_secs(0.83), "0.8s")     # sub-10s keeps a decimal
+        self.assertEqual(wc._fmt_secs(42.0), "42s")      # tens of seconds, whole
+        self.assertEqual(wc._fmt_secs(185.0), "3m 05s")  # minutes + zero-padded seconds
+
+
 class TestMirrorFallback(unittest.TestCase):
     def setUp(self):
         self._sleep = wc.time.sleep
