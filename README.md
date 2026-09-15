@@ -183,6 +183,27 @@ so it's much faster than the busy reference instance) and **fall back to `overpa
 tile fails on kumi — both are equally up to date. POIs are © OpenStreetMap contributors (ODbL);
 treat the result as a "known targets" list, not an exhaustive one.
 
+## Give back: donate to OSM and the servers we lean on
+
+This tool is free because it stands on volunteer- and community-funded infrastructure. If it's
+useful to you, please consider chipping in to the projects that make it possible:
+
+- **OpenStreetMap** — the map data behind *everything* here (the basemaps, the businesses, the
+  addresses). Donate to the OpenStreetMap Foundation at
+  <https://supporting.openstreetmap.org/donate/> (or via
+  [OpenStreetMap Germany](https://www.openstreetmap.de/spenden/)).
+- **Overpass API** — the query service that names the businesses in your holes. The software is
+  free and open (AGPL, by Roland Olbricht). Its reference instance `overpass-api.de` — our
+  fallback mirror — is operated by the non-profit **FOSSGIS e.V.**; donate at
+  <https://www.fossgis.de/verein/spenden/> (German page; PayPal or bank transfer).
+- **kumi.systems** — the fast Overpass mirror this tool queries **by default**, run *free for the
+  community* by [Kumi Systems](https://kumi.systems/). They don't solicit public donations — the
+  way to support them is a thank-you and, if you ever need paid hosting, keeping them in mind.
+
+Not into giving money? **Mapping the businesses in your own "holes" back into OpenStreetMap is a
+donation too** — you're already standing in front of the unmapped ones, and it makes the next
+person's target list better, anywhere in the world.
+
 ## Privacy
 
 Your WiGLE exports and the generated map carry **real GPS coordinates**. They stay
