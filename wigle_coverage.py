@@ -111,6 +111,32 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 # option simply isn't offered. Your own key, never committed - see map_key.txt.example.
 MAP_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "map_key.txt")
 
+# Leaflet is vendored (BSD-2-Clause) and INLINED into the generated map, so the page is fully
+# self-contained: no CDN request, which a hardened browser (NoScript/tracking-protection) blocks
+# on file:// pages - and it works offline. Falls back to the CDN only if the vendored copy is
+# missing. Refresh with: scripts/vendor_leaflet.py (verifies the download against the SRI hash).
+LEAFLET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "leaflet")
+LEAFLET_CDN = "https://unpkg.com/leaflet@1.9.4/dist/"
+LEAFLET_SRI = {"leaflet.css": "sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=",
+               "leaflet.js": "sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="}
+
+
+def leaflet_head():
+    """(css, js) markup for the map <head>: the vendored Leaflet inlined (self-contained,
+    works in a hardened browser and offline), or CDN <link>/<script> with SRI as a fallback
+    if the vendored files aren't present."""
+    try:
+        with open(os.path.join(LEAFLET_DIR, "leaflet.css"), encoding="utf-8") as fh:
+            css = fh.read()
+        with open(os.path.join(LEAFLET_DIR, "leaflet.js"), encoding="utf-8") as fh:
+            js = fh.read()
+        return "<style>\n" + css + "\n</style>", "<script>\n" + js + "\n</script>"
+    except OSError:                    # no vendored copy -> CDN (may be blocked by a hardened browser)
+        return (f'<link rel="stylesheet" href="{LEAFLET_CDN}leaflet.css"'
+                f' integrity="{LEAFLET_SRI["leaflet.css"]}" crossorigin="anonymous"/>',
+                f'<script src="{LEAFLET_CDN}leaflet.js"'
+                f' integrity="{LEAFLET_SRI["leaflet.js"]}" crossorigin="anonymous"></script>')
+
 
 def read_map_key():
     """The API key from map_key.txt (first non-comment, non-blank line), or None."""
@@ -825,10 +851,8 @@ def _cov_color(count):
 _HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
- integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
- integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+__LEAFLET_CSS__
+__LEAFLET_JS__
 <style>
   html,body,#map{height:100%;margin:0}
   .legend{background:#fff;padding:8px 10px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.3);
@@ -1011,7 +1035,9 @@ def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=No
     # parse straight back to the original characters in JS.
     blob = (json.dumps(data)
             .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
-    html = _HTML.replace("__DATA__", blob).replace("__TITLE__", title)
+    css_tag, js_tag = leaflet_head()   # inlined vendored Leaflet (or CDN fallback)
+    html = (_HTML.replace("__LEAFLET_CSS__", css_tag).replace("__LEAFLET_JS__", js_tag)
+            .replace("__DATA__", blob).replace("__TITLE__", title))
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(html)
     return out_path

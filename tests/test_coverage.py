@@ -357,6 +357,42 @@ class TestTiledFetch(unittest.TestCase):
         self.assertEqual([p.name for p in pois], ["Now"])
 
 
+class TestLeafletInline(unittest.TestCase):
+    def test_inlines_vendored_leaflet(self):
+        css, js = wc.leaflet_head()
+        self.assertTrue(css.lstrip().startswith("<style>"))     # inlined, not a CDN <link>
+        self.assertTrue(js.lstrip().startswith("<script>"))
+        self.assertNotIn("unpkg.com", css)
+        self.assertNotIn("unpkg.com", js)
+        self.assertNotIn("url(images/", css)                   # icons inlined as data URIs
+        self.assertIn("data:image/png;base64", css)
+
+    def test_falls_back_to_cdn_when_vendor_missing(self):
+        import tempfile
+        orig = wc.LEAFLET_DIR
+        wc.LEAFLET_DIR = os.path.join(tempfile.gettempdir(), "wc_no_leaflet_dir_zzz")
+        try:
+            css, js = wc.leaflet_head()
+        finally:
+            wc.LEAFLET_DIR = orig
+        self.assertIn("unpkg.com/leaflet@1.9.4/dist/leaflet.css", css)
+        self.assertIn("integrity=", css)
+        self.assertIn("unpkg.com/leaflet@1.9.4/dist/leaflet.js", js)
+
+    def test_rendered_map_has_no_cdn_dependency(self):
+        import tempfile
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        coverage = {(0, 0): 3, (0, 1): 3}                      # two covered cells
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "m.html")
+            wc.render_html(coverage, [], dlat, dlon, 2, out)
+            with open(out, encoding="utf-8") as fh:
+                html = fh.read()
+        self.assertNotIn("unpkg.com", html)                    # fully self-contained
+        self.assertIn("<style>", html)
+        self.assertIn("1.9.4", html)                           # the inlined Leaflet source
+
+
 class TestFmtSecs(unittest.TestCase):
     def test_formats_elapsed(self):
         self.assertEqual(wc._fmt_secs(0.83), "0.8s")     # sub-10s keeps a decimal

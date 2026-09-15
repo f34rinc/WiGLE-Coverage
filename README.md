@@ -131,6 +131,15 @@ An **"OSM smooth (Stadia)"** option then appears in the layer switcher (and beco
 default). **No key → the option simply isn't shown.** `map_key.txt` is git-ignored — it's
 *your* key, never committed; you don't use anyone else's, and no one uses yours.
 
+### Self-contained map (no CDN)
+
+Leaflet is **vendored and inlined** into every generated `.html` (`vendor/leaflet/`, BSD-2-Clause,
+verified against its published hash), so the map has **no CDN dependency** — it loads in a
+hardened browser that blocks remote scripts (NoScript / strict tracking-protection), and the app
+itself works offline. Only the **basemap tiles** (Esri, or Stadia) are fetched at view time, so
+with no connection you'll see your grid, holes, targets and track on a blank background rather
+than streets. Refresh the bundled Leaflet with `python scripts/vendor_leaflet.py`.
+
 ### Target the holes: name the businesses (POIs)
 
 **On by default:** every run asks **OpenStreetMap** (via the Overpass API) what named
