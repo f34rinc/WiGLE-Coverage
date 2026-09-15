@@ -92,6 +92,13 @@ python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 50 --min-obs 2 --ou
 - **Orange cells** = *edges* — blank cells touching your coverage: the natural
   frontier to expand into.
 
+**Hotspots.** A toggle-able **"Hotspots (networks)"** layer marks your densest cells with
+WiGLE-style circles — sized by how many **networks** were captured there, with the count
+labeled on each (click for the exact number). It counts *actual APs* — from the KML/CSV
+directly, or from the SQLite backup's `network` table (not the GPS track). By default it
+shows your **top ~10% densest cells** (adaptive per dataset); `--hotspot N` sets an absolute
+threshold (only cells with ≥ N networks), and `--hotspot 0` turns it off.
+
 **Your actual path.** Pass `--track "C:\...\WiGLE Database Backup.sqlite"` and the map
 gains a toggle-able **blue line of where you really walked** — raw GPS fixes from the
 backup's `location` table, split into segments on time gaps (so separate walks don't

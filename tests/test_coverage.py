@@ -449,6 +449,30 @@ class TestLeafletInline(unittest.TestCase):
         self.assertIn("1.9.4", html)                           # the inlined Leaflet source
 
 
+class TestHotspots(unittest.TestCase):
+    def test_percentile_nearest_rank(self):
+        vals = list(range(1, 11))                      # 1..10, already sorted
+        self.assertEqual(wc._percentile(vals, 90), 10)
+        self.assertEqual(wc._percentile(vals, 50), 6)
+        self.assertEqual(wc._percentile([], 90), 0)
+
+    def test_hotspot_cells_filters_and_orders(self):
+        counts = {(0, 0): 5, (0, 1): 100, (0, 2): 268, (1, 0): 2}
+        hs = wc.hotspot_cells(counts, 50)
+        self.assertEqual([h[2] for h in hs], [100, 268])   # only >=50, ascending (biggest on top)
+        self.assertNotIn((0, 0), [(h[0], h[1]) for h in hs])
+
+    def test_render_embeds_hotspots(self):
+        import tempfile
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "m.html")
+            wc.render_html({(0, 0): 3, (0, 1): 3}, [], dlat, dlon, 2, out, hotspots=[[0, 0, 268]])
+            with open(out, encoding="utf-8") as fh:
+                html = fh.read()
+        self.assertIn('"hotspots": [[0, 0, 268]]', html)
+
+
 class TestFmtSecs(unittest.TestCase):
     def test_formats_elapsed(self):
         self.assertEqual(wc._fmt_secs(0.83), "0.8s")     # sub-10s keeps a decimal

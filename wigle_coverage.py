@@ -75,6 +75,7 @@ from collections import namedtuple, Counter
 CELL_SIZE_M   = 50      # grid cell edge in metres (~half a block; near the GPS floor)
 MIN_OBS       = 2       # APs in a cell before it counts as "covered" (filters strays)
 HOLE_THRESHOLD = 5      # covered 8-neighbours at/above this => "hole", else "edge"
+HOTSPOT_PCTL   = 90     # default "hotspots" = the top (100-this)% densest cells (adaptive)
 TRACK_GAP_MIN  = 5      # minutes; a larger gap between fixes starts a new track segment
 TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one (jitter)
 RUN_GAP_MIN    = 30     # minutes of quiet that separates one run/session from the next
@@ -370,6 +371,40 @@ def parse_sqlite_track(path):
     finally:
         con.close()
     return [(int(t), float(la), float(lo)) for (t, la, lo) in rows]
+
+
+def parse_sqlite_networks(path):
+    """Network locations from a WiGLE SQLite backup's `network` table (best-fix lat/lon).
+    Returns [(lat, lon), ...] - the actual APs, for counting "networks captured" per cell
+    (the WiGLE hotspot metric), distinct from the GPS track in `location`. Read-only."""
+    import sqlite3
+    import urllib.request
+    uri = "file:" + urllib.request.pathname2url(os.path.abspath(path)) + "?mode=ro"
+    con = sqlite3.connect(uri, uri=True)
+    try:
+        rows = con.execute(
+            "SELECT bestlat, bestlon FROM network "
+            "WHERE bestlat BETWEEN -90 AND 90 AND bestlon BETWEEN -180 AND 180 "
+            "AND NOT (bestlat = 0 AND bestlon = 0)").fetchall()
+    finally:
+        con.close()
+    return [(float(la), float(lo)) for (la, lo) in rows]
+
+
+def _percentile(sorted_vals, pct):
+    """The pct-th percentile of an already-sorted list (nearest-rank)."""
+    if not sorted_vals:
+        return 0
+    i = min(len(sorted_vals) - 1, int(len(sorted_vals) * pct / 100))
+    return sorted_vals[i]
+
+
+def hotspot_cells(counts, threshold):
+    """Cells with at least `threshold` networks, as [[row, col, count], ...] biggest first
+    (so the densest circles draw on top). `counts` is a {(row,col): n} network-count map."""
+    hs = [[r, c, n] for (r, c), n in counts.items() if n >= threshold]
+    hs.sort(key=lambda x: x[2])          # ascending -> big ones added last -> on top
+    return hs
 
 
 def build_track_segments(rows, gap_ms, min_move_deg):
@@ -978,6 +1013,9 @@ __LEAFLET_JS__
   .leaflet-popup-content .ptargets{margin:3px 0 0;padding-left:20px}
   .leaflet-popup-content .ptargets li{margin:2px 0;line-height:1.3}
   .leaflet-popup-content b{color:#0b525b}
+  .hslabel{background:none;border:none;box-shadow:none;padding:0;margin:0;color:#3b0764;
+           font-weight:700;font-size:11px;text-shadow:0 0 2px #fff,0 0 2px #fff}
+  .hslabel::before{display:none}
 </style></head><body><div id="map"></div>
 <script>
 const D = __DATA__;
@@ -1108,6 +1146,22 @@ if (D.track && D.track.length){
   picker.addTo(map);
 }
 
+// hotspots: WiGLE-style circles at the densest cells, sized by network count, number labeled
+if (D.hotspots && D.hotspots.length){
+  const hs = L.layerGroup();
+  D.hotspots.forEach(([r,c,n])=>{
+    const b=bounds(r,c), ct=center(b);
+    const rad = Math.max(6, Math.min(28, 4 + Math.sqrt(n)*0.45));
+    L.circleMarker(ct, {radius:rad, color:'#7c2d12', weight:1,
+                        fillColor:'#f97316', fillOpacity:.5})
+     .bindTooltip(''+n, {permanent:true, direction:'center', className:'hslabel'})
+     .bindPopup('<b>'+n+' networks</b> here (SSIDs captured)<br>'+maplink(ct[0],ct[1]))
+     .addTo(hs);
+  });
+  hs.addTo(map);
+  layerCtl.addOverlay(hs, 'Hotspots (networks)');
+}
+
 map.fitBounds(D.fit);
 
 const lg = L.control({position:'bottomright'});
@@ -1116,6 +1170,7 @@ lg.onAdd = function(){ const d=L.DomUtil.create('div','legend');
    + '<div><span class="sw" style="background:#0b525b"></span>covered (dense &rarr; light)</div>'
    + '<div><span class="sw" style="background:#dc2626"></span>hole &ndash; skipped street</div>'
    + '<div><span class="sw" style="background:#f59e0b"></span>edge &ndash; walk outward</div>'
+   + (D.hotspots && D.hotspots.length ? '<div><span class="sw" style="background:#f97316;border-radius:50%"></span>hotspot &ndash; networks captured</div>' : '')
    + (D.track && D.track.length ? '<div><span class="sw" id="trkSw" style="background:#111827"></span>your track</div>' : '')
    + '<div style="margin-top:4px;color:#555">'+D.covered.length+' covered cells &middot; '
    + D.recs.length+' suggestions</div>';
@@ -1125,7 +1180,8 @@ lg.addTo(map);
 
 
 def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=None,
-                map_key=None, poi_by_hole=None, targets_doc=None, more_by_hole=None):
+                map_key=None, poi_by_hole=None, targets_doc=None, more_by_hole=None,
+                hotspots=None):
     poi_by_hole = poi_by_hole or {}
     more_by_hole = more_by_hole or {}
     covered = covered_cells(coverage, min_obs)
@@ -1140,7 +1196,7 @@ def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=No
            [(max(rows) + 1) * dlat, (max(cols) + 1) * dlon]]
     data = {"dlat": dlat, "dlon": dlon, "covered": cov_list, "recs": rec_list,
             "fit": fit, "track": track_segments or [], "mapKey": map_key or "",
-            "targetsDoc": targets_doc or ""}
+            "targetsDoc": targets_doc or "", "hotspots": hotspots or []}
     title = "WiGLE coverage &amp; frontier"
     # Escape <, >, & in the embedded JSON so a POI name from OSM can't break out of the
     # <script> block (e.g. a business literally named "</script>"). JSON \uXXXX escapes
@@ -1252,6 +1308,9 @@ def parse_args():
                    help=f"networks in a cell for it to count as covered (default {MIN_OBS})")
     g.add_argument("--hole-threshold", type=int, default=HOLE_THRESHOLD, metavar="N",
                    help=f"covered neighbours for a hole vs an edge (default {HOLE_THRESHOLD})")
+    g.add_argument("--hotspot", type=int, default=None, metavar="N",
+                   help="show WiGLE-style circles on cells with >= N networks captured "
+                        f"(default: adaptive, your top {100 - HOTSPOT_PCTL}%% densest; 0 = off)")
     g.add_argument("--track-gap", type=float, default=TRACK_GAP_MIN, metavar="MIN",
                    help=f"minutes that break the path into segments (default {TRACK_GAP_MIN})")
 
@@ -1382,6 +1441,29 @@ def run(args):
     edges = len(recs) - holes
     print(f"  {holes:,} holes + {edges:,} edges; rendering map...")
 
+    # Hotspots: count actual NETWORKS per cell ("SSIDs captured", the WiGLE metric) - not GPS
+    # fixes. KML/CSV points already ARE networks; from a SQLite backup, read the `network` table.
+    if cover_files and not (args.run or args.date):
+        net_counts = coverage
+    elif sqlite_path:
+        try:
+            nets = [(la, lo) for (la, lo) in parse_sqlite_networks(sqlite_path)
+                    if -90 <= la <= 90 and -180 <= lo <= 180 and not (la == 0 and lo == 0)]
+            net_counts = build_coverage(nets, dlat, dlon)
+        except Exception:
+            net_counts = coverage
+    else:
+        net_counts = coverage
+    hs_arg = getattr(args, "hotspot", None)
+    if hs_arg is None:                              # adaptive default: the top ~10% densest cells
+        hs_thr = max(3, _percentile(sorted(net_counts.values()), HOTSPOT_PCTL))
+    else:
+        hs_thr = hs_arg
+    hotspots = hotspot_cells(net_counts, hs_thr) if hs_thr and hs_thr > 0 else []
+    if hotspots:
+        print(f"  {len(hotspots):,} hotspot cell(s) with {C.b}>={hs_thr}{C.reset} networks "
+              f"{C.dim}(peak {max(h[2] for h in hotspots):,}){C.reset}")
+
     track_segs = None
     if track_fixes:
         track_segs = build_track_segments(
@@ -1472,7 +1554,7 @@ def run(args):
     render_html(coverage, recs, dlat, dlon, args.min_obs, out,
                 track_segments=track_segs, map_key=read_map_key(), poi_by_hole=poi_by_hole,
                 targets_doc=os.path.basename(tpath_html) if tpath_html else None,
-                more_by_hole=more_by_hole)
+                more_by_hole=more_by_hole, hotspots=hotspots)
 
     print(_rule("="))
     print(f"  {len(points):,} points  ->  {C.b}{len(covered):,}{C.reset} covered cells (~{args.cell_size:.0f} m)")
@@ -1548,7 +1630,7 @@ def _menu_namespace(st, list_runs=False):
         run=st["run"] if st["mode"] == "run" else None,
         date=st["date"] if st["mode"] == "date" else None,
         pois=st.get("pois", True), poi_source=st.get("poi_source", "osm"),
-        overture_confidence=OVERTURE_MIN_CONFIDENCE,
+        overture_confidence=OVERTURE_MIN_CONFIDENCE, hotspot=None,
         max_pois_per_hole=MAX_POIS_PER_HOLE, max_pois=MAX_POIS_TOTAL,
         refresh_pois=False, out=None, no_open=True, menu=False)
 
