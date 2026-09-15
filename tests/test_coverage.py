@@ -320,14 +320,14 @@ class TestTiledFetch(unittest.TestCase):
         self.assertEqual(stats["failed"], 1)
         self.assertEqual([p.name for p in pois], ["Good"])   # the healthy tile still came through
 
-    def test_retry_then_success(self):
+    def test_tile_fails_over_to_next_mirror_within_a_tile(self):
         import tempfile
         calls = {"n": 0}
 
         def fake(s, w, n, e, timeout=60, url=None):
             calls["n"] += 1
             if calls["n"] == 1:
-                raise RuntimeError("HTTP Error 504")   # first attempt fails, retry succeeds
+                raise RuntimeError("HTTP Error 504")   # primary fails, falls over to the next mirror
             return [wc.POI("Late", "shop", 0.0, 0.0, "", "", "", "")]
 
         wc.fetch_pois = fake
@@ -369,12 +369,14 @@ class TestMirrorFallback(unittest.TestCase):
         self._sleep = wc.time.sleep
         wc.time.sleep = lambda *a, **k: None
         self._fetch = wc.fetch_pois
+        self.dlat, self.dlon = wc.meters_to_deg(50, LAT)
 
     def tearDown(self):
         wc.time.sleep = self._sleep
         wc.fetch_pois = self._fetch
 
     def test_falls_over_from_primary_to_secondary_mirror(self):
+        import tempfile
         seen = []
 
         def fake(s, w, n, e, timeout=60, url=None):
@@ -384,10 +386,31 @@ class TestMirrorFallback(unittest.TestCase):
             return [wc.POI("ok", "shop", 0.0, 0.0, "", "", "", "")]
 
         wc.fetch_pois = fake
-        pois = wc._fetch_pois_net((0.0, 0.0, 0.01, 0.01), 25)
-        self.assertEqual(seen[0], wc.OVERPASS_URLS[0])   # tried the primary first
-        self.assertEqual(seen[1], wc.OVERPASS_URLS[1])   # then fell over to the fallback
-        self.assertEqual([p.name for p in pois], ["ok"])
+        with tempfile.TemporaryDirectory() as d:
+            pois, stats = wc.fetch_pois_tiled([(0, 0)], self.dlat, self.dlon, cache_dir=d, pause=0)
+        self.assertEqual(stats["failed"], 0)
+        self.assertEqual([p.name for p in pois], ["ok"])     # served by the fallback
+        self.assertEqual(seen[0], wc.OVERPASS_URLS[0])       # tried the primary first
+        self.assertEqual(seen[1], wc.OVERPASS_URLS[1])       # then fell over to the fallback
+
+    def test_circuit_breaker_drops_a_mirror_after_two_failures(self):
+        import tempfile
+        calls = {wc.OVERPASS_URLS[0]: 0, wc.OVERPASS_URLS[1]: 0}
+
+        def fake(s, w, n, e, timeout=60, url=None):
+            calls[url] += 1
+            if url == wc.OVERPASS_URLS[0]:            # primary always fails
+                raise RuntimeError("HTTP Error 504")
+            return [wc.POI("ok", "shop", (s + n) / 2, (w + e) / 2, "", "", "", "")]
+
+        wc.fetch_pois = fake
+        holes = [(k * 1000, k * 1000) for k in range(5)]     # 5 separate tiles
+        with tempfile.TemporaryDirectory() as d:
+            pois, stats = wc.fetch_pois_tiled(holes, self.dlat, self.dlon, cache_dir=d, pause=0)
+        self.assertIn(wc.OVERPASS_URLS[0], stats["dropped"])       # primary was dropped
+        self.assertEqual(calls[wc.OVERPASS_URLS[0]], 2)           # tried exactly twice, then ignored
+        self.assertEqual(stats["failed"], 0)                     # the fallback served every tile
+        self.assertEqual(len(pois), 5)
 
 
 if __name__ == "__main__":

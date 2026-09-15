@@ -172,16 +172,23 @@ Set either to `0` to lift that cap.
 **Gentle to OpenStreetMap.** Instead of one big citywide bounding box (which the Overpass server
 will time out with a `504` on a large entire-DB view), the lookup walks the area **one small
 ~1 km tile at a time, only over tiles that actually contain a hole** — each tile **cached
-locally** (`./.poi_cache/`, ~30 days, git-ignored), **retried** on a transient error, and
-**politely paced**. So re-running over the same ground (tweaking `--cell-size`, `--min-obs`, …)
-doesn't re-query OSM at all, and a hiccup on one tile yields a **partial** list rather than wiping
-it (failed tiles aren't cached — re-run to fill them in). Pass **`--refresh-pois`** to force a
-fresh pull.
+locally** (`./.poi_cache/`, ~30 days, git-ignored) and **politely paced**. So re-running over the
+same ground (tweaking `--cell-size`, `--min-obs`, …) doesn't re-query OSM at all, and a hiccup on
+one tile yields a **partial** list rather than wiping it (failed tiles aren't cached — re-run to
+fill them in). Pass **`--refresh-pois`** to force a fresh pull.
 
-Queries go to the **kumi.systems** Overpass mirror by default (well-resourced and minutely-fresh,
-so it's much faster than the busy reference instance) and **fall back to `overpass-api.de`** if a
-tile fails on kumi — both are equally up to date. POIs are © OpenStreetMap contributors (ODbL);
-treat the result as a "known targets" list, not an exhaustive one.
+Queries go to the **kumi.systems** mirror by default (well-resourced and minutely-fresh, so it's
+much faster than the busy reference instance) and **fall back to `overpass-api.de`** — both are
+equally up to date. Three things keep a bad Overpass day from becoming a 15-minute crawl:
+
+- a **short per-tile timeout**, so a slow/dead tile bails in seconds instead of ~40s;
+- a **circuit breaker** — if a mirror fails **two tiles in a row**, it's dropped for the rest of
+  the run (no more waiting on a server that's down); the other mirror carries on;
+- **per-mirror pacing** — the reference instance is paced more slowly so we don't trip its rate
+  limit (`429`).
+
+POIs are © OpenStreetMap contributors (ODbL); treat the result as a "known targets" list, not an
+exhaustive one.
 
 ## Give back: donate to OSM and the servers we lean on
 

@@ -42,8 +42,10 @@ that panel); and in a plain <map>_targets.txt. The printable sheet groups holes 
 one - falling back to the coordinate when it doesn't. The list is trimmed for usefulness -
 --max-pois-per-hole (default 10) and --max-pois (default 100, richest holes first); extras
 show as "+N more". The lookup is gentle to OSM: it queries ONE small grid tile at a time
-(only tiles that contain a hole), each cached locally (./.poi_cache, ~30 days), retried on a
-transient error, and politely paced - never one big citywide scan. A failed tile is skipped
+(only tiles that contain a hole), each cached locally (./.poi_cache, ~30 days) and politely
+paced - never one big citywide scan. Mirrors: kumi.systems first, overpass-api.de as fallback,
+with a short per-tile timeout and a circuit breaker that drops a mirror after 2 failures in a
+row (so a bad Overpass day fails over fast instead of crawling). A failed tile is skipped
 (partial list, never a wiped one) and never cached; --refresh-pois forces a fresh pull. OSM
 address/POI coverage varies worldwide.
 
@@ -91,11 +93,15 @@ POI = namedtuple("POI", "name cat lat lon street housenumber postcode suburb")
 POI_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".poi_cache")
 POI_CACHE_TTL_DAYS = 30
 POI_CACHE_GRID = 0.01    # ~1.1 km tiles: we query ONE small tile at a time, only where holes are
-# Gentle-to-Overpass knobs: small per-tile queries, retried on transient errors, politely paced.
-OVERPASS_TIMEOUT = 25    # server-side [out:json][timeout:N], per tile - keep it short so a slow
-                         # tile bails and moves on fast (a small ~1km tile answers well under this)
-OVERPASS_RETRIES = 2     # extra attempts on a transient error, rotating through OVERPASS_URLS
-OVERPASS_PAUSE_S = 0.7   # polite pause between network queries (cache hits don't pause)
+# Gentle-to-Overpass knobs: small per-tile queries, immediate mirror-fallback with a circuit
+# breaker (drop a mirror that keeps failing), politely paced (more for rate-limiting mirrors).
+OVERPASS_TIMEOUT = 12       # server-side [out:json][timeout:N], per tile - short so a slow/dead
+                            # tile bails fast (a small ~1km tile normally answers in a few seconds)
+OVERPASS_FAIL_STREAK = 2    # consecutive failures on a mirror -> drop it for the rest of the sweep
+OVERPASS_PAUSE_S = 0.7      # default polite pause between network queries (cache hits don't pause)
+OVERPASS_PAUSE_OVERRIDE = { # mirrors that rate-limit get a longer pause so we don't trip their 429
+    "https://overpass-api.de/api/interpreter": 2.5,
+}
 # Default folder read when no path/--track is given: a "data" folder beside this script
 # (git-ignored). Drop your KML/CSV + .sqlite backup here and just run the tool.
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
@@ -392,7 +398,7 @@ def fetch_pois(south, west, north, east, timeout=OVERPASS_TIMEOUT, url=None):
     req = urllib.request.Request(
         url or OVERPASS_URL, data=urllib.parse.urlencode({"data": query}).encode(),
         headers={"User-Agent": "wigle-coverage (personal wardrive planner; stdlib urllib)"})
-    with urllib.request.urlopen(req, timeout=timeout + 15) as resp:
+    with urllib.request.urlopen(req, timeout=timeout + 10) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     out = []
     for el in data.get("elements", []):
@@ -446,74 +452,109 @@ def _poi_cache_path(bbox, cache_dir):
     return os.path.join(cache_dir, "poi_" + hashlib.sha1(key.encode()).hexdigest()[:16] + ".json")
 
 
-def _fetch_pois_net(bbox, timeout, retries=OVERPASS_RETRIES, urls=None):
-    """fetch_pois with a few retries + exponential backoff on transient Overpass errors
-    (504 gateway timeout, 429, connection resets), rotating through the mirrors: the primary
-    (kumi) first, then the fallback (overpass-api.de), so a bad tile on one instance fails
-    over to the other immediately. Raises the last error if every attempt fails - the caller
-    (per tile) counts it as a failure and moves on, so one bad tile never aborts the sweep,
-    and a failed tile is never cached."""
-    urls = urls or OVERPASS_URLS
-    last = None
-    for attempt in range(retries + 1):
-        try:
-            return fetch_pois(*bbox, timeout=timeout, url=urls[attempt % len(urls)])
-        except Exception as exc:
-            last = exc
-            if attempt >= retries:
-                raise
-            time.sleep(min(2 ** attempt, 8))       # 1s, 2s, 4s, ... capped
-    raise last                                     # unreachable, but keeps intent explicit
+def _mirror_name(url):
+    """Just the host of an Overpass endpoint, for readable log lines."""
+    m = re.search(r"//([^/]+)", url)
+    return m.group(1) if m else url
 
 
-def fetch_pois_cached(south, west, north, east, timeout=OVERPASS_TIMEOUT, refresh=False,
-                      cache_dir=None, ttl_days=POI_CACHE_TTL_DAYS):
-    """fetch_pois for ONE small tile with an on-disk cache keyed by the snapped bbox, so
-    re-running over the same area doesn't re-query OSM. Returns (pois, from_cache). Only a
-    successful query is cached (a failure raises and is never stored)."""
-    if cache_dir is None:
-        cache_dir = POI_CACHE_DIR          # resolved at call time (tests/callers can override)
-    bbox = _snap_bbox(south, west, north, east)
+def _mirror_pause(url):
+    """Polite pause after querying a mirror - longer for ones that rate-limit."""
+    return OVERPASS_PAUSE_OVERRIDE.get(url, OVERPASS_PAUSE_S)
+
+
+def _poi_cache_get(bbox, cache_dir, ttl_days=POI_CACHE_TTL_DAYS):
+    """Cached POIs for a snapped tile bbox, or None on a miss/stale/unreadable entry."""
     path = _poi_cache_path(bbox, cache_dir)
-    if not refresh and os.path.exists(path):
-        try:
-            if time.time() - os.path.getmtime(path) < ttl_days * 86400:
-                with open(path, encoding="utf-8") as fh:
-                    rows = json.load(fh)
-                return [POI(*r) for r in rows], True
-        except Exception:
-            pass                                   # unreadable/stale cache -> just refetch
-    pois = _fetch_pois_net(bbox, timeout)          # raises on persistent failure (not cached)
+    try:
+        if os.path.exists(path) and time.time() - os.path.getmtime(path) < ttl_days * 86400:
+            with open(path, encoding="utf-8") as fh:
+                return [POI(*r) for r in json.load(fh)]
+    except Exception:
+        pass                                   # unreadable/stale -> treat as a miss
+    return None
+
+
+def _poi_cache_put(bbox, cache_dir, pois):
+    """Store a successful tile result (atomic, best-effort)."""
     try:
         os.makedirs(cache_dir, exist_ok=True)
+        path = _poi_cache_path(bbox, cache_dir)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump([list(p) for p in pois], fh)
-        os.replace(tmp, path)                       # atomic write
+        os.replace(tmp, path)
     except Exception:
-        pass                                        # caching is best-effort
+        pass
+
+
+def fetch_pois_cached(south, west, north, east, timeout=OVERPASS_TIMEOUT, refresh=False,
+                      cache_dir=None, ttl_days=POI_CACHE_TTL_DAYS, url=None):
+    """fetch_pois for ONE small tile with an on-disk cache keyed by the snapped bbox, so
+    re-running over the same area doesn't re-query OSM. Queries `url` (default primary mirror)
+    only on a cache miss. Returns (pois, from_cache). Only a successful query is cached."""
+    if cache_dir is None:
+        cache_dir = POI_CACHE_DIR          # resolved at call time (tests/callers can override)
+    bbox = _snap_bbox(south, west, north, east)
+    if not refresh:
+        got = _poi_cache_get(bbox, cache_dir, ttl_days)
+        if got is not None:
+            return got, True
+    pois = fetch_pois(*bbox, timeout=timeout, url=url)   # raises on failure (not cached)
+    _poi_cache_put(bbox, cache_dir, pois)
     return pois, False
 
 
 def fetch_pois_tiled(hole_cells, dlat, dlon, refresh=False, cache_dir=None,
-                     timeout=OVERPASS_TIMEOUT, pause=OVERPASS_PAUSE_S, on_progress=None):
-    """Look up POIs the gentle way: one small grid tile at a time, only over tiles that
-    contain a hole, each cached and retried, with a polite pause between network queries.
-    A failing tile is counted and skipped (its neighbours still succeed), so a transient
-    Overpass hiccup yields a partial list instead of wiping it. Returns (pois, stats) with
-    stats = {tiles, hits, queried, failed}."""
+                     timeout=OVERPASS_TIMEOUT, pause=None, on_progress=None, urls=None,
+                     max_fail_streak=OVERPASS_FAIL_STREAK, ttl_days=POI_CACHE_TTL_DAYS):
+    """Look up POIs the gentle way: one small grid tile at a time, only over tiles that contain
+    a hole, each cached, politely paced (longer for rate-limiting mirrors). Mirror handling:
+      - a tile is tried against the live mirrors in order (primary first); the first that
+        answers wins, so a bad tile fails over to the next mirror immediately;
+      - a CIRCUIT BREAKER drops any mirror that fails `max_fail_streak` tiles in a row - it
+        won't be tried again for the rest of the sweep (no more waiting on a dead server);
+      - a success resets that mirror's streak.
+    A tile that no live mirror can serve is counted failed and skipped (partial list, never a
+    wipe; failures aren't cached). Returns (pois, stats) with stats = {tiles, hits, queried,
+    failed, dropped:[urls]}. `pause` overrides per-mirror pacing when given (0 disables it)."""
+    if cache_dir is None:
+        cache_dir = POI_CACHE_DIR
     tiles = hole_tiles(hole_cells, dlat, dlon)
-    pois, stats = [], {"tiles": len(tiles), "hits": 0, "queried": 0, "failed": 0}
-    for i, bbox in enumerate(tiles):
-        try:
-            tile_pois, cached = fetch_pois_cached(*bbox, timeout=timeout, refresh=refresh,
-                                                  cache_dir=cache_dir)
+    active = list(urls or OVERPASS_URLS)       # live mirrors, in preference order
+    streak = {u: 0 for u in active}
+    pois = []
+    stats = {"tiles": len(tiles), "hits": 0, "queried": 0, "failed": 0, "dropped": []}
+    for i, tile in enumerate(tiles):
+        bbox = _snap_bbox(*tile)
+        cached = None if refresh else _poi_cache_get(bbox, cache_dir, ttl_days)
+        if cached is not None:                 # cache hit needs no mirror at all
+            pois.extend(cached)
+            stats["hits"] += 1
+            if on_progress:
+                on_progress(i + 1, stats)
+            continue
+        tile_pois, used = None, None
+        for url in list(active):               # snapshot: we may drop from `active` mid-loop
+            try:
+                tile_pois = fetch_pois(*bbox, timeout=timeout, url=url)
+                _poi_cache_put(bbox, cache_dir, tile_pois)
+                streak[url] = 0                # success clears this mirror's streak
+                used = url
+                break
+            except Exception:
+                streak[url] = streak.get(url, 0) + 1
+                if streak[url] >= max_fail_streak and url in active:
+                    active.remove(url)         # circuit breaker: stop using this mirror
+                    stats["dropped"].append(url)
+        if tile_pois is not None:
             pois.extend(tile_pois)
-            stats["hits" if cached else "queried"] += 1
-            if not cached and pause and i < len(tiles) - 1:
-                time.sleep(pause)                   # pace only between real network queries
-        except Exception:
-            stats["failed"] += 1                    # one bad tile doesn't stop the rest
+            stats["queried"] += 1
+            p = pause if pause is not None else _mirror_pause(used)
+            if p and i < len(tiles) - 1:
+                time.sleep(p)                  # pace only after a real network query
+        else:
+            stats["failed"] += 1               # no live mirror served it; re-run later to fill
         if on_progress:
             on_progress(i + 1, stats)
     return pois, stats
@@ -1211,7 +1252,7 @@ def run(args):
         else:
             ntiles = len(hole_tiles(hole_cells, dlat, dlon))
             print(f"looking up businesses (OpenStreetMap) across {len(hole_cells)} holes "
-                  f"in {ntiles} small tile(s) {C.dim}(gentle: cached, retried, paced){C.reset}...")
+                  f"in {ntiles} small tile(s) {C.dim}(gentle: cached, mirror-fallback, paced){C.reset}...")
 
             def _prog(done, st):
                 sys.stdout.write(f"\r  tiles {done}/{st['tiles']}  "
@@ -1229,6 +1270,10 @@ def run(args):
             print(f"  OSM lookup: {_fmt_secs(poi_secs)}  "
                   f"{C.dim}({stats['queried']} queried, {stats['hits']} cached, "
                   f"{stats['failed']} failed){C.reset}")
+            if stats.get("dropped"):
+                names = ", ".join(_mirror_name(u) for u in stats["dropped"])
+                print(f"  {C.yellow}note:{C.reset} dropped {names} after "
+                      f"{OVERPASS_FAIL_STREAK} failures in a row - used the fallback for the rest.")
             if stats["failed"] and not pois:
                 print(f"  !! all {stats['failed']} tile(s) failed (Overpass busy?); rendering "
                       f"without targets. Re-run later to fill it in.")
