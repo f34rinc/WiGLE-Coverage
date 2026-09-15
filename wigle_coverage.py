@@ -40,7 +40,7 @@ fly to that hole); in a standalone, printable <map>_targets.html field sheet (li
 that panel); and in a plain <map>_targets.txt. The printable sheet groups holes by postcode
 (then neighborhood, then "unlocated") and shows each business's street address when OSM has
 one - falling back to the coordinate when it doesn't. The list is trimmed for usefulness -
---max-pois-per-hole (default 10) and --max-pois (default 100, richest holes first); extras
+--max-pois-per-hole (default 4) and --max-pois (default 100, richest holes first); extras
 show as "+N more". SOURCE: --poi-source osm (default, no setup) or overture (Overture Maps
 places - far better business coverage worldwide; needs `pip install duckdb`, one query over your
 area, cached; --overture-confidence trims low-confidence rows). With OSM, the lookup is gentle:
@@ -93,7 +93,7 @@ OVERPASS_URL = OVERPASS_URLS[0]        # default single endpoint (fetch_pois) - 
 # any named venue is a target. Changing this set changes the cache key (tiles re-query once).
 POI_KEYS = ("shop", "amenity", "office", "tourism", "leisure", "craft",
             "healthcare", "club", "historic")
-MAX_POIS_PER_HOLE = 10   # businesses shown per hole (0 = no cap); extras become "+N more"
+MAX_POIS_PER_HOLE = 4    # businesses shown per hole (0 = no cap); extras become "+N more"
 MAX_POIS_TOTAL    = 100  # total businesses across all holes, richest holes first (0 = no cap)
 # One named business from OSM. Address fields (universal OSM addr:* tags) may be blank -
 # coverage varies worldwide - so every consumer falls back gracefully when they're empty.

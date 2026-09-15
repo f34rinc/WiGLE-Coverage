@@ -173,7 +173,7 @@ You get the same list **four ways**, so you can plan at the desk and work off it
 
 | flag | default | meaning |
 |---|--:|---|
-| `--max-pois-per-hole` | 10 | most businesses shown per hole; extras collapse to a **"+N more"** note |
+| `--max-pois-per-hole` | 4 | most businesses shown per hole; extras collapse to a **"+N more"** note |
 | `--max-pois` | 100 | total across all holes — keeps the **richest holes whole**, drops the sparsest past the budget |
 
 Set either to `0` to lift that cap.
