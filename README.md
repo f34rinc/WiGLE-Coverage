@@ -169,9 +169,13 @@ You get the same list **four ways**, so you can plan at the desk and work off it
 
 Set either to `0` to lift that cap.
 
-**Polite to OpenStreetMap.** It's **one Overpass query** per area, and the response is **cached
-locally** (`./.poi_cache/`, ~30 days, git-ignored) — so re-running over the same ground (tweaking
-`--cell-size`, `--min-obs`, etc.) doesn't re-query OSM at all. Pass **`--refresh-pois`** to force a
+**Gentle to OpenStreetMap.** Instead of one big citywide bounding box (which the Overpass server
+will time out with a `504` on a large entire-DB view), the lookup walks the area **one small
+~1 km tile at a time, only over tiles that actually contain a hole** — each tile **cached
+locally** (`./.poi_cache/`, ~30 days, git-ignored), **retried** on a transient error, and
+**politely paced**. So re-running over the same ground (tweaking `--cell-size`, `--min-obs`, …)
+doesn't re-query OSM at all, and a hiccup on one tile yields a **partial** list rather than wiping
+it (failed tiles aren't cached — re-run to fill them in). Pass **`--refresh-pois`** to force a
 fresh pull. POIs are © OpenStreetMap contributors (ODbL); treat the result as a "known targets"
 list, not an exhaustive one.
 

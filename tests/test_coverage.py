@@ -271,5 +271,91 @@ class TestPoiCache(unittest.TestCase):
         self.assertEqual(calls["n"], 2)                        # --refresh forced a fresh query
 
 
+class TestTiledFetch(unittest.TestCase):
+    def setUp(self):
+        self._sleep = wc.time.sleep
+        wc.time.sleep = lambda *a, **k: None       # no real backoff/pacing waits in tests
+        self._fetch = wc.fetch_pois
+        self.dlat, self.dlon = wc.meters_to_deg(50, LAT)
+
+    def tearDown(self):
+        wc.time.sleep = self._sleep
+        wc.fetch_pois = self._fetch
+
+    def test_only_tiles_with_holes_and_two_far_holes_split(self):
+        far = [(0, 0), (1000, 1000)]               # ~0.45 deg apart -> two different tiles
+        tiles = wc.hole_tiles(far, self.dlat, self.dlon)
+        self.assertEqual(len(tiles), 2)
+
+    def test_unions_tiles_and_counts(self):
+        import tempfile
+        calls = []
+
+        def fake(s, w, n, e, timeout=60):
+            calls.append((round(s, 3), round(w, 3)))
+            return [wc.POI(f"P{len(calls)}", "shop", (s + n) / 2, (w + e) / 2, "", "", "", "")]
+
+        wc.fetch_pois = fake
+        with tempfile.TemporaryDirectory() as d:
+            pois, stats = wc.fetch_pois_tiled([(0, 0), (1000, 1000)], self.dlat, self.dlon,
+                                              cache_dir=d, pause=0)
+        self.assertEqual(stats["tiles"], 2)
+        self.assertEqual(stats["queried"], 2)
+        self.assertEqual(stats["failed"], 0)
+        self.assertEqual(len(pois), 2)             # one POI unioned from each tile
+
+    def test_partial_failure_keeps_the_good_tile(self):
+        import tempfile
+        bad_tile = wc._tile_of(1000 * self.dlat, 1000 * self.dlon)
+
+        def fake(s, w, n, e, timeout=60):
+            if (round(s, 6), round(w, 6)) == (bad_tile[0], bad_tile[1]):
+                raise RuntimeError("HTTP Error 504")
+            return [wc.POI("Good", "shop", (s + n) / 2, (w + e) / 2, "", "", "", "")]
+
+        wc.fetch_pois = fake
+        with tempfile.TemporaryDirectory() as d:
+            pois, stats = wc.fetch_pois_tiled([(0, 0), (1000, 1000)], self.dlat, self.dlon,
+                                              cache_dir=d, pause=0)
+        self.assertEqual(stats["failed"], 1)
+        self.assertEqual([p.name for p in pois], ["Good"])   # the healthy tile still came through
+
+    def test_retry_then_success(self):
+        import tempfile
+        calls = {"n": 0}
+
+        def fake(s, w, n, e, timeout=60):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("HTTP Error 504")   # first attempt fails, retry succeeds
+            return [wc.POI("Late", "shop", 0.0, 0.0, "", "", "", "")]
+
+        wc.fetch_pois = fake
+        with tempfile.TemporaryDirectory() as d:
+            pois, stats = wc.fetch_pois_tiled([(0, 0)], self.dlat, self.dlon, cache_dir=d, pause=0)
+        self.assertEqual(stats["failed"], 0)
+        self.assertEqual(stats["queried"], 1)
+        self.assertEqual([p.name for p in pois], ["Late"])
+
+    def test_failure_is_not_cached(self):
+        import tempfile
+        state = {"fail": True}
+
+        def fake(s, w, n, e, timeout=60):
+            if state["fail"]:
+                raise RuntimeError("HTTP Error 504")
+            return [wc.POI("Now", "shop", 0.0, 0.0, "", "", "", "")]
+
+        wc.fetch_pois = fake
+        with tempfile.TemporaryDirectory() as d:
+            _, s1 = wc.fetch_pois_tiled([(0, 0)], self.dlat, self.dlon, cache_dir=d, pause=0)
+            self.assertEqual(s1["failed"], 1)
+            self.assertFalse(os.listdir(d))         # nothing cached from the failed tile
+            state["fail"] = False                    # now it recovers
+            pois, s2 = wc.fetch_pois_tiled([(0, 0)], self.dlat, self.dlon, cache_dir=d, pause=0)
+        self.assertEqual(s2["queried"], 1)           # re-queried (not served an empty cache)
+        self.assertEqual([p.name for p in pois], ["Now"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

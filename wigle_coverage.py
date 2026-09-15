@@ -41,9 +41,11 @@ that panel); and in a plain <map>_targets.txt. The printable sheet groups holes 
 (then neighborhood, then "unlocated") and shows each business's street address when OSM has
 one - falling back to the coordinate when it doesn't. The list is trimmed for usefulness -
 --max-pois-per-hole (default 10) and --max-pois (default 100, richest holes first); extras
-show as "+N more". Overpass responses are cached locally (./.poi_cache, ~30 days) so re-runs
-over the same area don't re-query OSM; --refresh-pois forces a fresh pull. OSM address/POI
-coverage varies worldwide.
+show as "+N more". The lookup is gentle to OSM: it queries ONE small grid tile at a time
+(only tiles that contain a hole), each cached locally (./.poi_cache, ~30 days), retried on a
+transient error, and politely paced - never one big citywide scan. A failed tile is skipped
+(partial list, never a wiped one) and never cached; --refresh-pois forces a fresh pull. OSM
+address/POI coverage varies worldwide.
 
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
 git-ignored. Nothing here is uploaded or published.
@@ -83,7 +85,11 @@ POI = namedtuple("POI", "name cat lat lon street housenumber postcode suburb")
 # Local cache of Overpass responses so re-runs over the same area don't re-query OSM.
 POI_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".poi_cache")
 POI_CACHE_TTL_DAYS = 30
-POI_CACHE_GRID = 0.01    # snap the query bbox to this degree grid so nearby runs share a hit
+POI_CACHE_GRID = 0.01    # ~1.1 km tiles: we query ONE small tile at a time, only where holes are
+# Gentle-to-Overpass knobs: small per-tile queries, retried on transient errors, politely paced.
+OVERPASS_TIMEOUT = 60    # server-side [out:json][timeout:N], per tile
+OVERPASS_RETRIES = 2     # extra attempts on a transient error (504/timeout), with backoff
+OVERPASS_PAUSE_S = 0.7   # polite pause between network queries (cache hits don't pause)
 # Default folder read when no path/--track is given: a "data" folder beside this script
 # (git-ignored). Drop your KML/CSV + .sqlite backup here and just run the tool.
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
@@ -401,16 +407,48 @@ def _snap_bbox(south, west, north, east, grid=POI_CACHE_GRID):
             math.ceil(north / grid) * grid, math.ceil(east / grid) * grid)
 
 
+def _tile_of(lat, lon, grid=POI_CACHE_GRID):
+    """The single grid tile (a small bbox) that contains a point."""
+    s = round(math.floor(lat / grid) * grid, 6)
+    w = round(math.floor(lon / grid) * grid, 6)
+    return (s, w, round(s + grid, 6), round(w + grid, 6))
+
+
+def hole_tiles(hole_cells, dlat, dlon, grid=POI_CACHE_GRID):
+    """The sorted set of grid tiles that actually contain a hole cell - so we query only
+    ground worth querying, never one giant bbox over empty space between clusters. Both
+    corners of each ~50 m hole cell are used, so a cell straddling a tile line hits both."""
+    tiles = set()
+    for (r, c) in hole_cells:
+        for la, lo in ((r * dlat, c * dlon), ((r + 1) * dlat, (c + 1) * dlon)):
+            tiles.add(_tile_of(la, lo, grid))
+    return sorted(tiles)
+
+
 def _poi_cache_path(bbox, cache_dir):
     key = "|".join(f"{v:.2f}" for v in bbox) + "|" + ",".join(POI_KEYS) + "|v2"
     return os.path.join(cache_dir, "poi_" + hashlib.sha1(key.encode()).hexdigest()[:16] + ".json")
 
 
-def fetch_pois_cached(south, west, north, east, timeout=60, refresh=False,
+def _fetch_pois_net(bbox, timeout, retries=OVERPASS_RETRIES):
+    """fetch_pois with a few retries + exponential backoff on transient Overpass errors
+    (504 gateway timeout, 429, connection resets). Raises the last error if all attempts fail
+    - the caller (per tile) counts it as a failure and moves on, so one bad tile never aborts
+    the sweep, and a failed tile is never cached."""
+    for attempt in range(retries + 1):
+        try:
+            return fetch_pois(*bbox, timeout=timeout)
+        except Exception:
+            if attempt >= retries:
+                raise
+            time.sleep(min(2 ** attempt, 8))       # 1s, 2s, 4s, ... capped
+
+
+def fetch_pois_cached(south, west, north, east, timeout=OVERPASS_TIMEOUT, refresh=False,
                       cache_dir=None, ttl_days=POI_CACHE_TTL_DAYS):
-    """fetch_pois with an on-disk cache keyed by the snapped bbox, so re-running over the
-    same area (tweaking grid params, etc.) doesn't re-query OSM. Returns (pois, from_cache).
-    A one-query-per-area courtesy to the volunteer-run Overpass service."""
+    """fetch_pois for ONE small tile with an on-disk cache keyed by the snapped bbox, so
+    re-running over the same area doesn't re-query OSM. Returns (pois, from_cache). Only a
+    successful query is cached (a failure raises and is never stored)."""
     if cache_dir is None:
         cache_dir = POI_CACHE_DIR          # resolved at call time (tests/callers can override)
     bbox = _snap_bbox(south, west, north, east)
@@ -423,7 +461,7 @@ def fetch_pois_cached(south, west, north, east, timeout=60, refresh=False,
                 return [POI(*r) for r in rows], True
         except Exception:
             pass                                   # unreadable/stale cache -> just refetch
-    pois = fetch_pois(*bbox, timeout=timeout)
+    pois = _fetch_pois_net(bbox, timeout)          # raises on persistent failure (not cached)
     try:
         os.makedirs(cache_dir, exist_ok=True)
         tmp = path + ".tmp"
@@ -433,6 +471,30 @@ def fetch_pois_cached(south, west, north, east, timeout=60, refresh=False,
     except Exception:
         pass                                        # caching is best-effort
     return pois, False
+
+
+def fetch_pois_tiled(hole_cells, dlat, dlon, refresh=False, cache_dir=None,
+                     timeout=OVERPASS_TIMEOUT, pause=OVERPASS_PAUSE_S, on_progress=None):
+    """Look up POIs the gentle way: one small grid tile at a time, only over tiles that
+    contain a hole, each cached and retried, with a polite pause between network queries.
+    A failing tile is counted and skipped (its neighbours still succeed), so a transient
+    Overpass hiccup yields a partial list instead of wiping it. Returns (pois, stats) with
+    stats = {tiles, hits, queried, failed}."""
+    tiles = hole_tiles(hole_cells, dlat, dlon)
+    pois, stats = [], {"tiles": len(tiles), "hits": 0, "queried": 0, "failed": 0}
+    for i, bbox in enumerate(tiles):
+        try:
+            tile_pois, cached = fetch_pois_cached(*bbox, timeout=timeout, refresh=refresh,
+                                                  cache_dir=cache_dir)
+            pois.extend(tile_pois)
+            stats["hits" if cached else "queried"] += 1
+            if not cached and pause and i < len(tiles) - 1:
+                time.sleep(pause)                   # pace only between real network queries
+        except Exception:
+            stats["failed"] += 1                    # one bad tile doesn't stop the rest
+        if on_progress:
+            on_progress(i + 1, stats)
+    return pois, stats
 
 
 def assign_pois_to_holes(pois, hole_cells, dlat, dlon):
@@ -1123,26 +1185,37 @@ def run(args):
         if not hole_cells:
             print("no holes to look up businesses for.")
         else:
-            rs = [c[0] for c in hole_cells]
-            cs = [c[1] for c in hole_cells]
-            print(f"looking up businesses (OpenStreetMap) in {len(hole_cells)} holes...")
-            try:
-                pois, cached = fetch_pois_cached(
-                    min(rs) * dlat, min(cs) * dlon, (max(rs) + 1) * dlat, (max(cs) + 1) * dlon,
-                    refresh=getattr(args, "refresh_pois", False))
-                print(f"  {'cache hit (no OSM query)' if cached else 'queried Overpass'}"
-                      f"{C.dim} - {len(pois)} named places in the area{C.reset}")
-                found = assign_pois_to_holes(pois, hole_cells, dlat, dlon)
-                nfound = sum(len(v) for v in found.values())
-                # Trim for display: <= N per hole, then whole holes richest-first up to a total.
-                poi_by_hole, more_by_hole = cap_pois(
-                    found, recs, per_hole=getattr(args, "max_pois_per_hole", MAX_POIS_PER_HOLE),
-                    total=getattr(args, "max_pois", MAX_POIS_TOTAL))
-                nshown = sum(len(v) for v in poi_by_hole.values())
-                extra = "" if nshown == nfound else f" (capped from {nfound} across {len(found)})"
+            ntiles = len(hole_tiles(hole_cells, dlat, dlon))
+            print(f"looking up businesses (OpenStreetMap) across {len(hole_cells)} holes "
+                  f"in {ntiles} small tile(s) {C.dim}(gentle: cached, retried, paced){C.reset}...")
+
+            def _prog(done, st):
+                sys.stdout.write(f"\r  tiles {done}/{st['tiles']}  "
+                                 f"{C.green}{st['queried']} queried{C.reset}  "
+                                 f"{st['hits']} cached  "
+                                 f"{(C.red + str(st['failed']) + ' failed' + C.reset) if st['failed'] else '0 failed'}   ")
+                sys.stdout.flush()
+
+            pois, stats = fetch_pois_tiled(
+                hole_cells, dlat, dlon, refresh=getattr(args, "refresh_pois", False),
+                on_progress=_prog)
+            sys.stdout.write("\n")
+            if stats["failed"] and not pois:
+                print(f"  !! all {stats['failed']} tile(s) failed (Overpass busy?); rendering "
+                      f"without targets. Re-run later to fill it in.")
+            elif stats["failed"]:
+                print(f"  {C.yellow}note:{C.reset} {stats['failed']} tile(s) failed - the list is "
+                      f"partial; re-run later (cached tiles won't re-query).")
+            found = assign_pois_to_holes(pois, hole_cells, dlat, dlon)
+            nfound = sum(len(v) for v in found.values())
+            # Trim for display: <= N per hole, then whole holes richest-first up to a total.
+            poi_by_hole, more_by_hole = cap_pois(
+                found, recs, per_hole=getattr(args, "max_pois_per_hole", MAX_POIS_PER_HOLE),
+                total=getattr(args, "max_pois", MAX_POIS_TOTAL))
+            nshown = sum(len(v) for v in poi_by_hole.values())
+            extra = "" if nshown == nfound else f" (capped from {nfound} across {len(found)})"
+            if found:
                 print(f"  {nshown} named POIs across {len(poi_by_hole)} holes{extra}")
-            except Exception as exc:
-                print(f"  !! Overpass query failed ({exc}); rendering without targets")
 
     out = args.out or os.path.join(
         base_dir or os.getcwd(), f"wigle_coverage{tag}_{datetime.date.today():%Y%m%d}.html")
