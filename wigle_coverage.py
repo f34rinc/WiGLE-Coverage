@@ -1013,9 +1013,11 @@ __LEAFLET_JS__
   .leaflet-popup-content .ptargets{margin:3px 0 0;padding-left:20px}
   .leaflet-popup-content .ptargets li{margin:2px 0;line-height:1.3}
   .leaflet-popup-content b{color:#0b525b}
-  .hslabel{background:none;border:none;box-shadow:none;padding:0;margin:0;color:#3b0764;
-           font-weight:700;font-size:11px;text-shadow:0 0 2px #fff,0 0 2px #fff}
+  .hslabel{background:none;border:none;box-shadow:none;padding:0;margin:0;color:#fff;
+           font-weight:700;font-size:11px;text-shadow:0 0 2px #000,0 0 2px #000,0 0 1px #000}
   .hslabel::before{display:none}
+  .hsramp{display:inline-block;width:54px;height:10px;vertical-align:-1px;border:1px solid #0004;
+          border-radius:2px;background:linear-gradient(90deg,#fed976,#feb24c,#fd8d3c,#f03b20,#bd0026)}
 </style></head><body><div id="map"></div>
 <script>
 const D = __DATA__;
@@ -1146,14 +1148,18 @@ if (D.track && D.track.length){
   picker.addTo(map);
 }
 
-// hotspots: WiGLE-style circles at the densest cells, sized by network count, number labeled
+// hotspots: WiGLE-style circles at the densest cells, sized by network count, number labeled,
+// and COLOURED by rank within your hotspots (ColorBrewer YlOrRd, low->high) so the top spots pop
 if (D.hotspots && D.hotspots.length){
   const hs = L.layerGroup();
-  D.hotspots.forEach(([r,c,n])=>{
+  const HSC = ['#fed976','#feb24c','#fd8d3c','#f03b20','#bd0026'];   // YlOrRd 5-class
+  const HN = D.hotspots.length;                                      // sorted ascending by count
+  D.hotspots.forEach(([r,c,n],i)=>{
     const b=bounds(r,c), ct=center(b);
     const rad = Math.max(6, Math.min(28, 4 + Math.sqrt(n)*0.45));
-    L.circleMarker(ct, {radius:rad, color:'#7c2d12', weight:1,
-                        fillColor:'#f97316', fillOpacity:.5})
+    const tier = Math.min(HSC.length-1, Math.floor(i / HN * HSC.length));  // quantile / rank tier
+    L.circleMarker(ct, {radius:rad, color:'#7f1d1d', weight:1,
+                        fillColor:HSC[tier], fillOpacity:.72})
      .bindTooltip(''+n, {permanent:true, direction:'center', className:'hslabel'})
      .bindPopup('<b>'+n+' networks</b> here (SSIDs captured)<br>'+maplink(ct[0],ct[1]))
      .addTo(hs);
@@ -1170,7 +1176,7 @@ lg.onAdd = function(){ const d=L.DomUtil.create('div','legend');
    + '<div><span class="sw" style="background:#0b525b"></span>covered (dense &rarr; light)</div>'
    + '<div><span class="sw" style="background:#dc2626"></span>hole &ndash; skipped street</div>'
    + '<div><span class="sw" style="background:#f59e0b"></span>edge &ndash; walk outward</div>'
-   + (D.hotspots && D.hotspots.length ? '<div><span class="sw" style="background:#f97316;border-radius:50%"></span>hotspot &ndash; networks captured</div>' : '')
+   + (D.hotspots && D.hotspots.length ? '<div style="margin-top:2px">hotspots (networks) <span class="hsramp"></span> fewer&rarr;more</div>' : '')
    + (D.track && D.track.length ? '<div><span class="sw" id="trkSw" style="background:#111827"></span>your track</div>' : '')
    + '<div style="margin-top:4px;color:#555">'+D.covered.length+' covered cells &middot; '
    + D.recs.length+' suggestions</div>';
