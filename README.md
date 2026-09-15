@@ -187,8 +187,9 @@ one tile yields a **partial** list rather than wiping it (failed tiles aren't ca
 fill them in). Pass **`--refresh-pois`** to force a fresh pull.
 
 Queries go to the **kumi.systems** mirror by default (well-resourced and minutely-fresh, so it's
-much faster than the busy reference instance) and **fall back to `overpass-api.de`** — both are
-equally up to date. Three things keep a bad Overpass day from becoming a 15-minute crawl:
+much faster than the busy reference instance) and **fall back through `overpass-api.de`,
+`private.coffee`, and the French instance** in turn — all equally up to date. Three things keep a
+bad Overpass day from becoming a 15-minute crawl:
 
 - a **short per-tile timeout**, so a slow/dead tile bails in seconds instead of ~40s;
 - a **circuit breaker** — if a mirror fails **two tiles in a row**, it's dropped for the rest of

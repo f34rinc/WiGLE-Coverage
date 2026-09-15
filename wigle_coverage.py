@@ -81,9 +81,15 @@ EARTH_M_PER_DEG = 111320.0
 # reference instance) and fall back to overpass-api.de if a tile fails on kumi. Both are
 # equally up to date; a tile query rotates through these on retry.
 OVERPASS_URLS = ("https://overpass.kumi.systems/api/interpreter",
-                 "https://overpass-api.de/api/interpreter")
+                 "https://overpass-api.de/api/interpreter",
+                 "https://overpass.private.coffee/api/interpreter",
+                 "https://overpass.openstreetmap.fr/api/interpreter")
 OVERPASS_URL = OVERPASS_URLS[0]        # default single endpoint (fetch_pois) - primary mirror
-POI_KEYS = ("shop", "amenity", "office", "tourism", "leisure", "craft")
+# OSM top-level keys we treat as "a named place worth targeting". We always require a name, so
+# unnamed clutter (benches, bins) is excluded automatically. Broad on purpose - for wardriving
+# any named venue is a target. Changing this set changes the cache key (tiles re-query once).
+POI_KEYS = ("shop", "amenity", "office", "tourism", "leisure", "craft",
+            "healthcare", "club", "historic")
 MAX_POIS_PER_HOLE = 10   # businesses shown per hole (0 = no cap); extras become "+N more"
 MAX_POIS_TOTAL    = 100  # total businesses across all holes, richest holes first (0 = no cap)
 # One named business from OSM. Address fields (universal OSM addr:* tags) may be blank -
@@ -101,6 +107,7 @@ OVERPASS_FAIL_STREAK = 2    # consecutive failures on a mirror -> drop it for th
 OVERPASS_PAUSE_S = 0.7      # default polite pause between network queries (cache hits don't pause)
 OVERPASS_PAUSE_OVERRIDE = { # mirrors that rate-limit get a longer pause so we don't trip their 429
     "https://overpass-api.de/api/interpreter": 2.5,
+    "https://overpass.openstreetmap.fr/api/interpreter": 2.0,
 }
 # Default folder read when no path/--track is given: a "data" folder beside this script
 # (git-ignored). Drop your KML/CSV + .sqlite backup here and just run the tool.
