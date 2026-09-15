@@ -236,7 +236,7 @@ class TestPoiCache(unittest.TestCase):
         calls = {"n": 0}
         real = wc.fetch_pois
 
-        def fake(s, w, n, e, timeout=60):
+        def fake(s, w, n, e, timeout=60, url=None):
             calls["n"] += 1
             return [wc.POI("Shop", "shop", (s + n) / 2, (w + e) / 2, "", "", "", "")]
 
@@ -257,7 +257,7 @@ class TestPoiCache(unittest.TestCase):
         calls = {"n": 0}
         real = wc.fetch_pois
 
-        def fake(s, w, n, e, timeout=60):
+        def fake(s, w, n, e, timeout=60, url=None):
             calls["n"] += 1
             return []
 
@@ -291,7 +291,7 @@ class TestTiledFetch(unittest.TestCase):
         import tempfile
         calls = []
 
-        def fake(s, w, n, e, timeout=60):
+        def fake(s, w, n, e, timeout=60, url=None):
             calls.append((round(s, 3), round(w, 3)))
             return [wc.POI(f"P{len(calls)}", "shop", (s + n) / 2, (w + e) / 2, "", "", "", "")]
 
@@ -308,7 +308,7 @@ class TestTiledFetch(unittest.TestCase):
         import tempfile
         bad_tile = wc._tile_of(1000 * self.dlat, 1000 * self.dlon)
 
-        def fake(s, w, n, e, timeout=60):
+        def fake(s, w, n, e, timeout=60, url=None):
             if (round(s, 6), round(w, 6)) == (bad_tile[0], bad_tile[1]):
                 raise RuntimeError("HTTP Error 504")
             return [wc.POI("Good", "shop", (s + n) / 2, (w + e) / 2, "", "", "", "")]
@@ -324,7 +324,7 @@ class TestTiledFetch(unittest.TestCase):
         import tempfile
         calls = {"n": 0}
 
-        def fake(s, w, n, e, timeout=60):
+        def fake(s, w, n, e, timeout=60, url=None):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise RuntimeError("HTTP Error 504")   # first attempt fails, retry succeeds
@@ -341,7 +341,7 @@ class TestTiledFetch(unittest.TestCase):
         import tempfile
         state = {"fail": True}
 
-        def fake(s, w, n, e, timeout=60):
+        def fake(s, w, n, e, timeout=60, url=None):
             if state["fail"]:
                 raise RuntimeError("HTTP Error 504")
             return [wc.POI("Now", "shop", 0.0, 0.0, "", "", "", "")]
@@ -355,6 +355,32 @@ class TestTiledFetch(unittest.TestCase):
             pois, s2 = wc.fetch_pois_tiled([(0, 0)], self.dlat, self.dlon, cache_dir=d, pause=0)
         self.assertEqual(s2["queried"], 1)           # re-queried (not served an empty cache)
         self.assertEqual([p.name for p in pois], ["Now"])
+
+
+class TestMirrorFallback(unittest.TestCase):
+    def setUp(self):
+        self._sleep = wc.time.sleep
+        wc.time.sleep = lambda *a, **k: None
+        self._fetch = wc.fetch_pois
+
+    def tearDown(self):
+        wc.time.sleep = self._sleep
+        wc.fetch_pois = self._fetch
+
+    def test_falls_over_from_primary_to_secondary_mirror(self):
+        seen = []
+
+        def fake(s, w, n, e, timeout=60, url=None):
+            seen.append(url)
+            if url == wc.OVERPASS_URLS[0]:            # primary (kumi) is down for this tile
+                raise RuntimeError("HTTP Error 504")
+            return [wc.POI("ok", "shop", 0.0, 0.0, "", "", "", "")]
+
+        wc.fetch_pois = fake
+        pois = wc._fetch_pois_net((0.0, 0.0, 0.01, 0.01), 25)
+        self.assertEqual(seen[0], wc.OVERPASS_URLS[0])   # tried the primary first
+        self.assertEqual(seen[1], wc.OVERPASS_URLS[1])   # then fell over to the fallback
+        self.assertEqual([p.name for p in pois], ["ok"])
 
 
 if __name__ == "__main__":

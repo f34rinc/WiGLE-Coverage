@@ -176,8 +176,12 @@ locally** (`./.poi_cache/`, ~30 days, git-ignored), **retried** on a transient e
 **politely paced**. So re-running over the same ground (tweaking `--cell-size`, `--min-obs`, …)
 doesn't re-query OSM at all, and a hiccup on one tile yields a **partial** list rather than wiping
 it (failed tiles aren't cached — re-run to fill them in). Pass **`--refresh-pois`** to force a
-fresh pull. POIs are © OpenStreetMap contributors (ODbL); treat the result as a "known targets"
-list, not an exhaustive one.
+fresh pull.
+
+Queries go to the **kumi.systems** Overpass mirror by default (well-resourced and minutely-fresh,
+so it's much faster than the busy reference instance) and **fall back to `overpass-api.de`** if a
+tile fails on kumi — both are equally up to date. POIs are © OpenStreetMap contributors (ODbL);
+treat the result as a "known targets" list, not an exhaustive one.
 
 ## Privacy
 

@@ -74,8 +74,13 @@ TRACK_GAP_MIN  = 5      # minutes; a larger gap between fixes starts a new track
 TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one (jitter)
 RUN_GAP_MIN    = 30     # minutes of quiet that separates one run/session from the next
 EARTH_M_PER_DEG = 111320.0
-# Overpass (OpenStreetMap) - names businesses/POIs inside the "hole" cells (on by default)
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Overpass (OpenStreetMap) - names businesses/POIs inside the "hole" cells (on by default).
+# kumi.systems first (well-resourced, minutely-fresh -> usually much faster than the busy
+# reference instance) and fall back to overpass-api.de if a tile fails on kumi. Both are
+# equally up to date; a tile query rotates through these on retry.
+OVERPASS_URLS = ("https://overpass.kumi.systems/api/interpreter",
+                 "https://overpass-api.de/api/interpreter")
+OVERPASS_URL = OVERPASS_URLS[0]        # default single endpoint (fetch_pois) - primary mirror
 POI_KEYS = ("shop", "amenity", "office", "tourism", "leisure", "craft")
 MAX_POIS_PER_HOLE = 10   # businesses shown per hole (0 = no cap); extras become "+N more"
 MAX_POIS_TOTAL    = 100  # total businesses across all holes, richest holes first (0 = no cap)
@@ -87,8 +92,9 @@ POI_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".poi_c
 POI_CACHE_TTL_DAYS = 30
 POI_CACHE_GRID = 0.01    # ~1.1 km tiles: we query ONE small tile at a time, only where holes are
 # Gentle-to-Overpass knobs: small per-tile queries, retried on transient errors, politely paced.
-OVERPASS_TIMEOUT = 60    # server-side [out:json][timeout:N], per tile
-OVERPASS_RETRIES = 2     # extra attempts on a transient error (504/timeout), with backoff
+OVERPASS_TIMEOUT = 25    # server-side [out:json][timeout:N], per tile - keep it short so a slow
+                         # tile bails and moves on fast (a small ~1km tile answers well under this)
+OVERPASS_RETRIES = 2     # extra attempts on a transient error, rotating through OVERPASS_URLS
 OVERPASS_PAUSE_S = 0.7   # polite pause between network queries (cache hits don't pause)
 # Default folder read when no path/--track is given: a "data" folder beside this script
 # (git-ignored). Drop your KML/CSV + .sqlite backup here and just run the tool.
@@ -365,16 +371,17 @@ def _load_fixes(path):
 
 
 # ---- POIs (name the businesses in each hole, via OpenStreetMap / Overpass) ----
-def fetch_pois(south, west, north, east, timeout=60):
-    """One Overpass query for named POIs (shops/amenities/...) in a bbox. Returns a list of
-    POI records; address fields come from OSM addr:* tags (often blank). Raises on failure
-    (caller degrades). `out ... tags` already returns addr:* - no extra request/cost."""
+def fetch_pois(south, west, north, east, timeout=OVERPASS_TIMEOUT, url=None):
+    """One Overpass query for named POIs (shops/amenities/...) in a bbox, against `url` (an
+    Overpass endpoint; defaults to the primary mirror). Returns a list of POI records; address
+    fields come from OSM addr:* tags (often blank). Raises on failure (caller degrades).
+    `out ... tags` already returns addr:* - no extra request/cost."""
     import urllib.request
     import urllib.parse
     parts = "".join(f'nwr["name"]["{k}"]({south},{west},{north},{east});' for k in POI_KEYS)
     query = f"[out:json][timeout:{int(timeout)}];({parts});out center tags;"
     req = urllib.request.Request(
-        OVERPASS_URL, data=urllib.parse.urlencode({"data": query}).encode(),
+        url or OVERPASS_URL, data=urllib.parse.urlencode({"data": query}).encode(),
         headers={"User-Agent": "wigle-coverage (personal wardrive planner; stdlib urllib)"})
     with urllib.request.urlopen(req, timeout=timeout + 15) as resp:
         data = json.loads(resp.read().decode("utf-8"))
@@ -430,18 +437,24 @@ def _poi_cache_path(bbox, cache_dir):
     return os.path.join(cache_dir, "poi_" + hashlib.sha1(key.encode()).hexdigest()[:16] + ".json")
 
 
-def _fetch_pois_net(bbox, timeout, retries=OVERPASS_RETRIES):
+def _fetch_pois_net(bbox, timeout, retries=OVERPASS_RETRIES, urls=None):
     """fetch_pois with a few retries + exponential backoff on transient Overpass errors
-    (504 gateway timeout, 429, connection resets). Raises the last error if all attempts fail
-    - the caller (per tile) counts it as a failure and moves on, so one bad tile never aborts
-    the sweep, and a failed tile is never cached."""
+    (504 gateway timeout, 429, connection resets), rotating through the mirrors: the primary
+    (kumi) first, then the fallback (overpass-api.de), so a bad tile on one instance fails
+    over to the other immediately. Raises the last error if every attempt fails - the caller
+    (per tile) counts it as a failure and moves on, so one bad tile never aborts the sweep,
+    and a failed tile is never cached."""
+    urls = urls or OVERPASS_URLS
+    last = None
     for attempt in range(retries + 1):
         try:
-            return fetch_pois(*bbox, timeout=timeout)
-        except Exception:
+            return fetch_pois(*bbox, timeout=timeout, url=urls[attempt % len(urls)])
+        except Exception as exc:
+            last = exc
             if attempt >= retries:
                 raise
             time.sleep(min(2 ** attempt, 8))       # 1s, 2s, 4s, ... capped
+    raise last                                     # unreachable, but keeps intent explicit
 
 
 def fetch_pois_cached(south, west, north, east, timeout=OVERPASS_TIMEOUT, refresh=False,
