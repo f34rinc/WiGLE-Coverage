@@ -967,11 +967,14 @@ __LEAFLET_JS__
   .targets .tcol{float:right;border:none;background:none;font:inherit;cursor:pointer;color:#555;padding:0 4px;line-height:1}
   .targets .tdoc{display:block;margin:4px 0 2px;font-size:12px;color:#0b6b78;text-decoration:none}
   .targets .tdoc:hover{text-decoration:underline}
-  .targets .tlist{list-style:none;margin:6px 0 0;padding:0;max-height:40vh;overflow:auto}
-  .targets .tlist li{padding:3px 4px;border-top:1px solid #eee;cursor:pointer;font-size:12px;line-height:1.35}
-  .targets .tlist li:hover{background:#f3f7f7}
+  .targets .tlist{list-style:none;margin:6px 0 0;padding:0;max-height:42vh;overflow:auto}
+  .targets .tlist>li{padding:5px 4px;border-top:1px solid #eee;cursor:pointer;font-size:12px;line-height:1.35}
+  .targets .tlist>li:hover{background:#f3f7f7}
   .targets .tn{display:inline-block;min-width:18px;text-align:center;background:#dc2626;color:#fff;
                border-radius:999px;font-size:11px;font-weight:700;padding:0 5px;margin-right:4px}
+  .targets .tnames{margin-top:3px;padding-left:3px}
+  .targets .tnames div{padding:1px 0}
+  .targets .tmore{color:#777;font-style:italic}
   .leaflet-popup-content .ptargets{margin:3px 0 0;padding-left:20px}
   .leaflet-popup-content .ptargets li{margin:2px 0;line-height:1.3}
   .leaflet-popup-content b{color:#0b525b}
@@ -1051,9 +1054,11 @@ if (targetHoles.length){
       ? '<a class="tdoc" href="'+encodeURI(D.targetsDoc)+'" target="_blank" rel="noopener">open printable list &#8599;</a>'
       : '';
     const rows = targetHoles.map((h,i)=>
-      '<li data-i="'+i+'"><span class="tn">'+h.names.length+'</span>'
-      + h.names.map(escapeHtml).join(' &middot; ')
-      + (h.more ? ' <i>+'+h.more+' more</i>' : '')+'</li>').join('');
+      '<li data-i="'+i+'"><span class="tn">'+h.names.length+'</span> targets'
+      + '<div class="tnames">'
+      + h.names.map(n => '<div>'+escapeHtml(n)+'</div>').join('')
+      + (h.more ? '<div class="tmore">+'+h.more+' more</div>' : '')
+      + '</div></li>').join('');
     d.innerHTML = '<button class="tcol" title="collapse">&#8211;</button>'
       + '<b>&#127919; Targets ('+targetHoles.length+')</b>'+doc
       + '<ul class="tlist">'+rows+'</ul>';
@@ -1061,7 +1066,7 @@ if (targetHoles.length){
     L.DomEvent.disableScrollPropagation(d);
     const ul = d.querySelector('.tlist'), btn = d.querySelector('.tcol');
     ul.addEventListener('click', function(ev){       // row -> fly to the hole + open its popup
-      const li = ev.target.closest('li'); if(!li) return;
+      const li = ev.target.closest('li[data-i]'); if(!li) return;
       const h = targetHoles[+li.dataset.i];
       map.flyTo(h.center, Math.max(map.getZoom(), 17));
       h.layer.openPopup();
