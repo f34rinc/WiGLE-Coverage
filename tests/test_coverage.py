@@ -357,6 +357,62 @@ class TestTiledFetch(unittest.TestCase):
         self.assertEqual([p.name for p in pois], ["Now"])
 
 
+class _FakeCon:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self, q):
+        self._q = q
+        return self
+
+    def fetchall(self):
+        return self._rows
+
+    def close(self):
+        pass
+
+
+class _FakeDuck:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def connect(self):
+        return _FakeCon(self._rows)
+
+
+class TestOverture(unittest.TestCase):
+    def test_maps_rows_caches_and_drops_coordless(self):
+        import tempfile
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        rows = [("H&M", "clothing_store", -22.97001, -43.18001,
+                 "Rua X, 116 - Botafogo", "22290-070", "Rio de Janeiro"),
+                ("NoGeo", "bar", None, None, "", "", "")]     # no coords -> dropped
+        with tempfile.TemporaryDirectory() as d:
+            pois, stats = wc.fetch_pois_overture([(0, 0)], dlat, dlon, cache_dir=d,
+                                                 duckdb=_FakeDuck(rows))
+            self.assertEqual(stats["queried"], 1)
+            self.assertEqual([p.name for p in pois], ["H&M"])        # coord-less row dropped
+            p = pois[0]
+            self.assertEqual(p.street, "Rua X, 116 - Botafogo")     # freeform -> street/address
+            self.assertEqual(p.postcode, "22290-070")
+            self.assertEqual(p.suburb, "Rio de Janeiro")
+            # a cache hit must NOT need duckdb
+            pois2, stats2 = wc.fetch_pois_overture([(0, 0)], dlat, dlon, cache_dir=d, duckdb=None)
+        self.assertEqual(stats2["hits"], 1)
+        self.assertEqual([p.name for p in pois2], ["H&M"])
+
+    def test_missing_duckdb_on_a_fresh_query_raises(self):
+        import tempfile
+        orig = wc._load_duckdb
+        wc._load_duckdb = lambda: None
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                with self.assertRaises(RuntimeError):
+                    wc.fetch_pois_overture([(0, 0)], 0.001, 0.001, cache_dir=d, duckdb=None)
+        finally:
+            wc._load_duckdb = orig
+
+
 class TestLeafletInline(unittest.TestCase):
     def test_inlines_vendored_leaflet(self):
         css, js = wc.leaflet_head()

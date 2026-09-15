@@ -41,7 +41,10 @@ that panel); and in a plain <map>_targets.txt. The printable sheet groups holes 
 (then neighborhood, then "unlocated") and shows each business's street address when OSM has
 one - falling back to the coordinate when it doesn't. The list is trimmed for usefulness -
 --max-pois-per-hole (default 10) and --max-pois (default 100, richest holes first); extras
-show as "+N more". The lookup is gentle to OSM: it queries ONE small grid tile at a time
+show as "+N more". SOURCE: --poi-source osm (default, no setup) or overture (Overture Maps
+places - far better business coverage worldwide; needs `pip install duckdb`, one query over your
+area, cached; --overture-confidence trims low-confidence rows). With OSM, the lookup is gentle:
+it queries ONE small grid tile at a time
 (only tiles that contain a hole), each cached locally (./.poi_cache, ~30 days) and politely
 paced - never one big citywide scan. Mirrors: kumi.systems first, overpass-api.de as fallback,
 with a short per-tile timeout and a circuit breaker that drops a mirror after 2 failures in a
@@ -108,6 +111,17 @@ OVERPASS_PAUSE_S = 0.7      # default polite pause between network queries (cach
 OVERPASS_PAUSE_OVERRIDE = { # mirrors that rate-limit get a longer pause so we don't trip their 429
     "https://overpass-api.de/api/interpreter": 2.5,
     "https://overpass.openstreetmap.fr/api/interpreter": 2.0,
+}
+# Optional alternative POI source: Overture Maps "places" (open, CDLA-Permissive 2.0). Vastly
+# better business coverage than OSM in many regions, worldwide. Needs the `duckdb` package
+# (pip install duckdb, ~10MB, no other deps) - stays out of the default OSM path entirely.
+POI_SOURCES = ("osm", "overture")
+OVERTURE_RELEASE = "2026-08-19.0"     # bump to a newer release date as they publish
+OVERTURE_S3 = ("s3://overturemaps-us-west-2/release/{rel}/theme=places/type=place/*")
+OVERTURE_MIN_CONFIDENCE = 0.5         # Overture scores each place 0-1; drop the low-confidence noise
+POI_ATTRIB = {                        # required attribution per source (shown on the outputs)
+    "osm": "OpenStreetMap contributors (ODbL)",
+    "overture": "Overture Maps Foundation (CDLA-Permissive 2.0); includes OpenStreetMap (ODbL)",
 }
 # Default folder read when no path/--track is given: a "data" folder beside this script
 # (git-ignored). Drop your KML/CSV + .sqlite backup here and just run the tool.
@@ -593,6 +607,84 @@ def fetch_pois_tiled(hole_cells, dlat, dlon, refresh=False, cache_dir=None,
     return pois, stats
 
 
+# ---- optional POI source: Overture Maps places (open, via DuckDB) -----------
+def _load_duckdb():
+    """Return the duckdb module, or None if it isn't installed (Overture is opt-in)."""
+    try:
+        import duckdb
+        return duckdb
+    except ImportError:
+        return None
+
+
+def _overture_cache_path(bbox, cache_dir, release, conf):
+    key = "|".join(f"{v:.2f}" for v in bbox) + f"|overture|{release}|c{conf}"
+    return os.path.join(cache_dir, "poi_" + hashlib.sha1(key.encode()).hexdigest()[:16] + ".json")
+
+
+def fetch_pois_overture(hole_cells, dlat, dlon, refresh=False, cache_dir=None,
+                        min_confidence=OVERTURE_MIN_CONFIDENCE, release=OVERTURE_RELEASE,
+                        duckdb=None, on_progress=None):
+    """POIs from Overture Maps 'places' (open, CDLA-Permissive) via DuckDB. Unlike Overpass
+    this is one bbox query over cloud Parquet (DuckDB prunes by the bbox column), so there's no
+    per-tile tiling - just the holes' bounding box, cached by bbox. Returns (pois, stats) shaped
+    like fetch_pois_tiled. Raises RuntimeError('duckdb-missing') if duckdb isn't installed."""
+    if cache_dir is None:
+        cache_dir = POI_CACHE_DIR
+    rs = [c[0] for c in hole_cells]
+    cs = [c[1] for c in hole_cells]
+    bbox = _snap_bbox(min(rs) * dlat, min(cs) * dlon, (max(rs) + 1) * dlat, (max(cs) + 1) * dlon)
+    stats = {"tiles": 1, "hits": 0, "queried": 0, "failed": 0, "dropped": []}
+    path = _overture_cache_path(bbox, cache_dir, release, min_confidence)
+    if not refresh:                        # a cache hit is just JSON - no duckdb needed
+        try:
+            if os.path.exists(path) and time.time() - os.path.getmtime(path) < POI_CACHE_TTL_DAYS * 86400:
+                with open(path, encoding="utf-8") as fh:
+                    pois = [POI(*r) for r in json.load(fh)]
+                stats["hits"] = 1
+                if on_progress:
+                    on_progress(1, stats)
+                return pois, stats
+        except Exception:
+            pass
+    duckdb = duckdb or _load_duckdb()      # a fresh query needs duckdb
+    if duckdb is None:
+        raise RuntimeError("duckdb-missing")
+    south, west, north, east = bbox
+    src = f"read_parquet('{OVERTURE_S3.format(rel=release)}', hive_partitioning=1)"
+    con = duckdb.connect()
+    try:
+        con.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs; "
+                    "SET s3_region='us-west-2';")
+        rows = con.execute(
+            "SELECT names.primary, categories.primary, ST_Y(geometry), ST_X(geometry), "
+            "addresses[1].freeform, addresses[1].postcode, addresses[1].locality "
+            f"FROM {src} "
+            f"WHERE bbox.xmin BETWEEN {west} AND {east} AND bbox.ymin BETWEEN {south} AND {north} "
+            f"AND names.primary IS NOT NULL AND confidence >= {float(min_confidence)}").fetchall()
+    finally:
+        con.close()
+    pois = []
+    for name, cat, lat, lon, freeform, postcode, locality in rows:
+        if lat is None or lon is None:
+            continue
+        # freeform is the whole street line ("Rua X, 116 - Bairro"); our poi_address() shows it
+        pois.append(POI(name, cat or "", float(lat), float(lon),
+                        freeform or "", "", postcode or "", locality or ""))
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump([list(p) for p in pois], fh)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+    stats["queried"] = 1
+    if on_progress:
+        on_progress(1, stats)
+    return pois, stats
+
+
 def assign_pois_to_holes(pois, hole_cells, dlat, dlon):
     """Bucket POIs into the hole cells they fall in. Returns {(row,col): [poi, ...]}."""
     holes = set(hole_cells)
@@ -696,13 +788,14 @@ def group_targets(holes):
     return ordered
 
 
-def write_targets(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None):
+def write_targets(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None,
+                  attribution="OpenStreetMap contributors (ODbL)"):
     """Write a field target list: businesses inside your holes, grouped by postcode (then
-    neighborhood, then unlocated), each with its street address when OSM has one."""
+    neighborhood, then unlocated), each with its street address when the source has one."""
     holes = _targets_for_holes(recs, poi_by_hole, dlat, dlon, more_by_hole)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("# wigle-coverage targets - named businesses inside your coverage 'holes'\n")
-        fh.write(f"# {datetime.date.today():%Y-%m-%d} | POIs (c) OpenStreetMap contributors (ODbL)\n\n")
+        fh.write(f"# {datetime.date.today():%Y-%m-%d} | POIs (c) {attribution}\n\n")
         if not holes:
             fh.write("(no named POIs found in any hole)\n")
             return
@@ -787,7 +880,7 @@ _TARGETS_DOC = """<!doctype html>
 </header>
 <p class="tip">Tick each stop as you pass it. <button class="btn" onclick="window.print()">Print</button></p>
 __CARDS__
-<footer>Business names &amp; positions &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors (ODbL) &middot; generated by wigle-coverage. Coverage varies by region &mdash; treat this as a known-targets list, not an exhaustive one.</footer>
+<footer>Business names &amp; positions &copy; __ATTRIB__ &middot; generated by wigle-coverage. Coverage varies by region &mdash; treat this as a known-targets list, not an exhaustive one.</footer>
 </div></body></html>"""
 
 
@@ -800,7 +893,8 @@ def _poi_li(p):
             f'<span class="cat">{_esc(p.cat) or "&nbsp;"}</span></li>')
 
 
-def render_targets_html(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None):
+def render_targets_html(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None,
+                        attribution="OpenStreetMap contributors (ODbL)"):
     """Write a standalone, offline, print-friendly hit-list of the businesses inside your
     coverage holes, grouped by postcode (then neighborhood, then unlocated) with each
     business's street address - a field sheet you can open on a phone (no network needed)."""
@@ -838,6 +932,7 @@ def render_targets_html(path, recs, poi_by_hole, dlat, dlon, more_by_hole=None):
            .replace("__H1__", "&#127919; Target list")
            .replace("__SUB__", f"by postcode &middot; {datetime.date.today():%Y-%m-%d}")
            .replace("__COUNT__", f"{len(holes)} holes &middot; {total} targets &middot; {len(sections)} areas")
+           .replace("__ATTRIB__", _esc(attribution))
            .replace("__CARDS__", cards_html))
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(doc)
@@ -1127,13 +1222,18 @@ def parse_args():
     g.add_argument("--run-gap", type=float, default=RUN_GAP_MIN, metavar="MIN",
                    help=f"minutes of gap that separates one run from the next (default {RUN_GAP_MIN})")
     g.add_argument("--pois", action=argparse.BooleanOptionalAction, default=True,
-                   help="name the businesses (OpenStreetMap) inside each hole (on by default; --no-pois to skip)")
+                   help="name the businesses inside each hole (on by default; --no-pois to skip)")
+    g.add_argument("--poi-source", choices=POI_SOURCES, default="osm", metavar="SRC",
+                   help="where business names come from: 'osm' (default, no setup) or 'overture' "
+                        "(far better coverage; needs: pip install duckdb)")
+    g.add_argument("--overture-confidence", type=float, default=OVERTURE_MIN_CONFIDENCE, metavar="C",
+                   help=f"Overture only: drop places below this confidence 0-1 (default {OVERTURE_MIN_CONFIDENCE})")
     g.add_argument("--max-pois-per-hole", type=int, default=MAX_POIS_PER_HOLE, metavar="N",
                    help=f"cap businesses shown per hole; extras become '+N more' (default {MAX_POIS_PER_HOLE}; 0 = no cap)")
     g.add_argument("--max-pois", type=int, default=MAX_POIS_TOTAL, metavar="N",
                    help=f"cap total businesses across all holes, richest first (default {MAX_POIS_TOTAL}; 0 = no cap)")
     g.add_argument("--refresh-pois", action="store_true",
-                   help="ignore the local POI cache and re-query OpenStreetMap for this area")
+                   help="ignore the local POI cache and re-query the source for this area")
 
     g = p.add_argument_group("grid + track tuning")
     g.add_argument("--cell-size", type=float, default=CELL_SIZE_M, metavar="M",
@@ -1278,41 +1378,64 @@ def run(args):
             track_fixes, args.track_gap * 60_000, TRACK_MIN_MOVE_M / EARTH_M_PER_DEG)
 
     poi_by_hole, more_by_hole = {}, {}
+    poi_attrib = POI_ATTRIB["osm"]
     if getattr(args, "pois", True):
         hole_cells = [tuple(r["cell"]) for r in recs if r["label"] == "hole"]
         if not hole_cells:
             print("no holes to look up businesses for.")
         else:
-            ntiles = len(hole_tiles(hole_cells, dlat, dlon))
-            print(f"looking up businesses (OpenStreetMap) across {len(hole_cells)} holes "
-                  f"in {ntiles} small tile(s) {C.dim}(gentle: cached, mirror-fallback, paced){C.reset}...")
-
-            def _prog(done, st):
-                sys.stdout.write(f"\r  tiles {done}/{st['tiles']}  "
-                                 f"{C.green}{st['queried']} queried{C.reset}  "
-                                 f"{st['hits']} cached  "
-                                 f"{(C.red + str(st['failed']) + ' failed' + C.reset) if st['failed'] else '0 failed'}   ")
-                sys.stdout.flush()
-
+            source = getattr(args, "poi_source", "osm")
+            if source == "overture" and _load_duckdb() is None:
+                print(f"  {C.yellow}!! --poi-source overture needs DuckDB.{C.reset} Install it once: "
+                      f"{C.b}pip install duckdb{C.reset} {C.dim}(~10MB, one package){C.reset}")
+                print("     falling back to OpenStreetMap for this run.")
+                source = "osm"
+            poi_attrib = POI_ATTRIB.get(source, POI_ATTRIB["osm"])
+            refresh = getattr(args, "refresh_pois", False)
+            pois, stats = [], {"tiles": 0, "queried": 0, "hits": 0, "failed": 0, "dropped": []}
             t_poi = time.perf_counter()
-            pois, stats = fetch_pois_tiled(
-                hole_cells, dlat, dlon, refresh=getattr(args, "refresh_pois", False),
-                on_progress=_prog)
-            poi_secs = time.perf_counter() - t_poi
-            sys.stdout.write("\n")
-            print(f"  OSM lookup: {_fmt_secs(poi_secs)}  "
-                  f"{C.dim}({stats['queried']} queried, {stats['hits']} cached, "
-                  f"{stats['failed']} failed){C.reset}")
-            if stats.get("dropped"):
-                names = ", ".join(_mirror_name(u) for u in stats["dropped"])
-                print(f"  {C.yellow}note:{C.reset} dropped {names} after "
-                      f"{OVERPASS_FAIL_STREAK} failures in a row - used the fallback for the rest.")
-            if stats["failed"] and not pois:
-                print(f"  !! all {stats['failed']} tile(s) failed (Overpass busy?); rendering "
-                      f"without targets. Re-run later to fill it in.")
-            elif stats["failed"]:
-                print(f"  {C.yellow}note:{C.reset} {stats['failed']} tile(s) failed - the list is "
-                      f"partial; re-run later (cached tiles won't re-query).")
+
+            if source == "overture":
+                print(f"looking up businesses (Overture Maps, release {OVERTURE_RELEASE}) {C.dim}"
+                      f"(one query over your area; first run downloads a DuckDB extension){C.reset}...")
+                try:
+                    pois, stats = fetch_pois_overture(
+                        hole_cells, dlat, dlon, refresh=refresh,
+                        min_confidence=getattr(args, "overture_confidence", OVERTURE_MIN_CONFIDENCE))
+                except Exception as exc:
+                    print(f"  {C.red}!! Overture query failed{C.reset} ({exc}); rendering without targets.")
+                poi_secs = time.perf_counter() - t_poi
+                how = "from cache" if stats.get("hits") else ("queried S3" if stats.get("queried") else "failed")
+                print(f"  Overture lookup: {_fmt_secs(poi_secs)}  {C.dim}({how}, {len(pois):,} places){C.reset}")
+            else:
+                ntiles = len(hole_tiles(hole_cells, dlat, dlon))
+                print(f"looking up businesses (OpenStreetMap) across {len(hole_cells)} holes "
+                      f"in {ntiles} small tile(s) {C.dim}(gentle: cached, mirror-fallback, paced){C.reset}...")
+
+                def _prog(done, st):
+                    sys.stdout.write(f"\r  tiles {done}/{st['tiles']}  "
+                                     f"{C.green}{st['queried']} queried{C.reset}  "
+                                     f"{st['hits']} cached  "
+                                     f"{(C.red + str(st['failed']) + ' failed' + C.reset) if st['failed'] else '0 failed'}   ")
+                    sys.stdout.flush()
+
+                pois, stats = fetch_pois_tiled(hole_cells, dlat, dlon, refresh=refresh, on_progress=_prog)
+                poi_secs = time.perf_counter() - t_poi
+                sys.stdout.write("\n")
+                print(f"  OSM lookup: {_fmt_secs(poi_secs)}  "
+                      f"{C.dim}({stats['queried']} queried, {stats['hits']} cached, "
+                      f"{stats['failed']} failed){C.reset}")
+                if stats.get("dropped"):
+                    names = ", ".join(_mirror_name(u) for u in stats["dropped"])
+                    print(f"  {C.yellow}note:{C.reset} dropped {names} after "
+                          f"{OVERPASS_FAIL_STREAK} failures in a row - used the fallback for the rest.")
+                if stats["failed"] and not pois:
+                    print(f"  !! all {stats['failed']} tile(s) failed (Overpass busy?); rendering "
+                          f"without targets. Re-run later to fill it in.")
+                elif stats["failed"]:
+                    print(f"  {C.yellow}note:{C.reset} {stats['failed']} tile(s) failed - the list is "
+                          f"partial; re-run later (cached tiles won't re-query).")
+
             found = assign_pois_to_holes(pois, hole_cells, dlat, dlon)
             nfound = sum(len(v) for v in found.values())
             # Trim for display: <= N per hole, then whole holes richest-first up to a total.
@@ -1333,8 +1456,8 @@ def run(args):
     if poi_by_hole:
         stem = os.path.splitext(out)[0]
         tpath_txt, tpath_html = stem + "_targets.txt", stem + "_targets.html"
-        write_targets(tpath_txt, recs, poi_by_hole, dlat, dlon, more_by_hole)
-        render_targets_html(tpath_html, recs, poi_by_hole, dlat, dlon, more_by_hole)
+        write_targets(tpath_txt, recs, poi_by_hole, dlat, dlon, more_by_hole, attribution=poi_attrib)
+        render_targets_html(tpath_html, recs, poi_by_hole, dlat, dlon, more_by_hole, attribution=poi_attrib)
 
     render_html(coverage, recs, dlat, dlon, args.min_obs, out,
                 track_segments=track_segs, map_key=read_map_key(), poi_by_hole=poi_by_hole,
@@ -1352,7 +1475,7 @@ def run(args):
     print(f"  {C.green}map:{C.reset} {out}")
     total = time.perf_counter() - t_start
     other = max(0.0, total - poi_secs)
-    breakdown = f"  {C.dim}({_fmt_secs(poi_secs)} OSM lookup + {_fmt_secs(other)} rest){C.reset}" if poi_secs else ""
+    breakdown = f"  {C.dim}({_fmt_secs(poi_secs)} POI lookup + {_fmt_secs(other)} rest){C.reset}" if poi_secs else ""
     print(f"  {C.b}time:{C.reset} {_fmt_secs(total)} start -> map{breakdown}")
     print(_rule("="))
     return out
@@ -1387,7 +1510,8 @@ def _menu_status(st):
     print(f"  {b}data {r} | {st['data']}")
     print(f"  {b}found{r} | {found}")
     print(f"  {b}grid {r} | cell {g}{st['cell_size']:.0f} m{r} | min-obs {st['min_obs']} | hole {st['hole_threshold']}")
-    print(f"  {b}mode {r} | {g}{mode}{r}  |  pois {'on' if st.get('pois') else 'off'}")
+    print(f"  {b}mode {r} | {g}{mode}{r}  |  pois {'on' if st.get('pois') else 'off'}"
+          f"  |  source {g}{st.get('poi_source', 'osm')}{r}")
 
 
 def _menu_help():
@@ -1399,7 +1523,8 @@ def _menu_help():
     print(_rule(label="tune"))
     print(f"  {y}cell{r} N         grid size (m)   {y}min{r} N   min obs   {y}hole{r} N   hole threshold")
     print(f"  {y}data{r} <path>    read a different folder")
-    print(f"  {y}pois{r}           toggle naming businesses in holes via OpenStreetMap")
+    print(f"  {y}pois{r}           toggle naming businesses in holes")
+    print(f"  {y}source{r}         switch POI source: osm <-> overture {C.dim}(needs duckdb){C.reset}")
     print(_rule(label="go"))
     print(f"  {y}go{r} (or Enter)  build + open the map    {y}help{r}   commands    {y}q{r}   quit")
     print(_rule("="))
@@ -1412,7 +1537,9 @@ def _menu_namespace(st, list_runs=False):
         run_gap=st["run_gap"], track_gap=st["track_gap"], list_runs=list_runs,
         run=st["run"] if st["mode"] == "run" else None,
         date=st["date"] if st["mode"] == "date" else None,
-        pois=st.get("pois", True), max_pois_per_hole=MAX_POIS_PER_HOLE, max_pois=MAX_POIS_TOTAL,
+        pois=st.get("pois", True), poi_source=st.get("poi_source", "osm"),
+        overture_confidence=OVERTURE_MIN_CONFIDENCE,
+        max_pois_per_hole=MAX_POIS_PER_HOLE, max_pois=MAX_POIS_TOTAL,
         refresh_pois=False, out=None, no_open=True, menu=False)
 
 
@@ -1420,7 +1547,7 @@ def interactive_menu(args):
     st = {"data": args.data or DATA_DIR, "cell_size": args.cell_size, "min_obs": args.min_obs,
           "hole_threshold": args.hole_threshold, "run_gap": args.run_gap,
           "track_gap": args.track_gap, "mode": "all", "run": None, "date": None,
-          "pois": getattr(args, "pois", True)}
+          "pois": getattr(args, "pois", True), "poi_source": getattr(args, "poi_source", "osm")}
     _menu_status(st)
     _menu_help()
     while True:
@@ -1466,6 +1593,12 @@ def interactive_menu(args):
                 _menu_status(st)
             elif cmd == "pois":
                 st["pois"] = not st.get("pois", False)
+                _menu_status(st)
+            elif cmd in ("source", "poi", "poi-source"):
+                st["poi_source"] = "overture" if st.get("poi_source", "osm") == "osm" else "osm"
+                if st["poi_source"] == "overture" and _load_duckdb() is None:
+                    print(f"  {C.yellow}heads-up:{C.reset} Overture needs DuckDB - "
+                          f"{C.b}pip install duckdb{C.reset} (falls back to OSM until then)")
                 _menu_status(st)
             elif cmd in ("help", "h", "?"):
                 _menu_help()

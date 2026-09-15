@@ -178,6 +178,28 @@ You get the same list **four ways**, so you can plan at the desk and work off it
 
 Set either to `0` to lift that cap.
 
+### More coverage: Overture Maps (optional)
+
+OSM business coverage is thin in a lot of the world. If your area comes up sparse, switch the
+source to **[Overture Maps](https://overturemaps.org/) places** — an open dataset
+(CDLA-Permissive 2.0) that blends Meta + Microsoft + OSM data, so it's *far* denser on actual
+businesses, worldwide, with clean addresses and postcodes.
+
+```
+pip install duckdb                                  # one ~10 MB package, no other deps
+python wigle_coverage.py --poi-source overture      # (or toggle `source` in the menu)
+```
+
+That's the whole setup. It runs **one query** over your area (DuckDB reads Overture's cloud
+Parquet, pruned to your bounding box) and caches the result like OSM, so re-runs are instant.
+`--overture-confidence C` drops low-confidence places (default `0.5`). In a real Rio run this
+pulled **497 businesses into 96 holes in ~13 s**, versus 71 across 36 holes from OSM.
+
+The default stays **`osm`** — no install, nothing changes — so Overture costs the 99% of users
+nothing. If you pass `--poi-source overture` without DuckDB, the tool tells you the one-line
+install and falls back to OSM for that run. POIs are © Overture Maps Foundation (which includes
+© OpenStreetMap, ODbL); the outputs carry that attribution automatically.
+
 **Gentle to OpenStreetMap.** Instead of one big citywide bounding box (which the Overpass server
 will time out with a `504` on a large entire-DB view), the lookup walks the area **one small
 ~1 km tile at a time, only over tiles that actually contain a hole** — each tile **cached
