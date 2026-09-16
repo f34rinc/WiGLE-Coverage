@@ -89,16 +89,16 @@ The full flag list (grouped as `python wigle_coverage.py --help` prints them):
 
 | flag | default | meaning |
 |---|--:|---|
-| `--list-runs` | – | list the runs (sessions) in the backup, then exit |
-| `--run N` | – | map only run *N* (from `--list-runs`) |
-| `--date YYYY-MM-DD` | – | map only that local date's fixes |
-| `--run-gap MIN` | 30 | gap that separates one run from the next |
-| `--pois` / `--no-pois` | on | name the businesses inside each hole |
-| `--poi-source SRC` | `osm` | `osm` or `overture` (Overture = far better coverage; needs `pip install duckdb`) |
-| `--overture-confidence C` | 0.5 | Overture only: drop places below this confidence (0–1) |
-| `--max-pois-per-hole N` | 4 | cap businesses shown per hole; extras → "+N more" (0 = no cap) |
-| `--max-pois N` | 100 | cap total across holes, richest first (0 = no cap) |
-| `--refresh-pois` | off | ignore the POI cache and re-query the source |
+| `--list-runs` | – | list the backup's sessions, then exit |
+| `--run N` | – | map only run *N* (see `--list-runs`) |
+| `--date YYYY-MM-DD` | – | map only that local date |
+| `--run-gap MIN` | 30 | gap separating one run from the next |
+| `--pois` / `--no-pois` | on | name the businesses in each hole |
+| `--poi-source SRC` | `osm` | `osm`, or `overture` (needs `pip install duckdb`) |
+| `--overture-confidence C` | 0.5 | Overture: min confidence, 0–1 |
+| `--max-pois-per-hole N` | 4 | max shown per hole; rest → "+N more" (0 = off) |
+| `--max-pois N` | 100 | max total, richest holes first (0 = off) |
+| `--refresh-pois` | off | ignore the cache; re-query the source |
 
 **Grid + track tuning**
 
