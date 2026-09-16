@@ -41,14 +41,16 @@ that panel); and in a plain <map>_targets.txt. The printable sheet groups holes 
 (then neighborhood, then "unlocated") and shows each business's street address when OSM has
 one - falling back to the coordinate when it doesn't. The list is trimmed for usefulness -
 --max-pois-per-hole (default 4) and --max-pois (default 100, richest holes first); extras
-show as "+N more". SOURCE: --poi-source osm (default, no setup) or overture (Overture Maps
-places - far better business coverage worldwide; needs `pip install duckdb`, one query over your
-area, cached; --overture-confidence trims low-confidence rows). With OSM, the lookup is gentle:
+show as "+N more". SOURCE: --poi-source overture (default - Overture Maps places, far better
+business coverage worldwide; needs `pip install duckdb`, one query over your area, cached;
+--overture-confidence trims low-confidence rows) or osm (no setup). Without duckdb the default
+auto-falls back to OSM, so it still works out of the box. With OSM, the lookup is gentle:
 it queries ONE small grid tile at a time
 (only tiles that contain a hole), each cached locally (./.poi_cache, ~30 days) and politely
-paced - never one big citywide scan. Mirrors: kumi.systems first, overpass-api.de as fallback,
-with a short per-tile timeout and a circuit breaker that drops a mirror after 2 failures in a
-row (so a bad Overpass day fails over fast instead of crawling). A failed tile is skipped
+paced - never one big citywide scan. Mirrors: overpass-api.de first (the reliable reference
+instance), kumi.systems as fallback, with a short per-tile timeout, polite backoff-and-retry when
+a mirror is just busy (429/50x), and a circuit breaker that drops a mirror after 2 hard failures
+in a row (so a bad Overpass day fails over fast instead of crawling). A failed tile is skipped
 (partial list, never a wiped one) and never cached; --refresh-pois forces a fresh pull. OSM
 address/POI coverage varies worldwide.
 
@@ -64,6 +66,7 @@ import json
 import glob
 import time
 import math
+import random
 import hashlib
 import argparse
 import datetime
@@ -82,13 +85,14 @@ TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one
 RUN_GAP_MIN    = 30     # minutes of quiet that separates one run/session from the next
 EARTH_M_PER_DEG = 111320.0
 # Overpass (OpenStreetMap) - names businesses/POIs inside the "hole" cells (on by default).
-# kumi.systems first (well-resourced, minutely-fresh -> usually much faster than the busy
-# reference instance) and fall back to overpass-api.de if a tile fails on kumi. Both are
-# equally up to date; a tile query rotates through these on retry.
-OVERPASS_URLS = ("https://overpass.kumi.systems/api/interpreter",
-                 "https://overpass-api.de/api/interpreter",
-                 "https://overpass.private.coffee/api/interpreter",
-                 "https://overpass.openstreetmap.fr/api/interpreter")
+# overpass-api.de first: it's the reference instance - a touch slower and it rate-limits (we
+# pace it), but reliably up when the community mirrors are struggling. kumi.systems is the
+# fallback: fast and no rate limit when it's healthy, but it has flaky spells. (Dropped two
+# ex-mirrors 2026-09-16: overpass.private.coffee shared kumi's server/IP so it was a redundant
+# duplicate that died in lockstep, and overpass.openstreetmap.fr started 403-ing our requests.)
+# Both remaining mirrors are equally up to date; a tile query rotates through them on retry.
+OVERPASS_URLS = ("https://overpass-api.de/api/interpreter",
+                 "https://overpass.kumi.systems/api/interpreter")
 OVERPASS_URL = OVERPASS_URLS[0]        # default single endpoint (fetch_pois) - primary mirror
 # OSM top-level keys we treat as "a named place worth targeting". We always require a name, so
 # unnamed clutter (benches, bins) is excluded automatically. Broad on purpose - for wardriving
@@ -112,8 +116,16 @@ OVERPASS_FAIL_STREAK = 2    # consecutive failures on a mirror -> drop it for th
 OVERPASS_PAUSE_S = 0.7      # default polite pause between network queries (cache hits don't pause)
 OVERPASS_PAUSE_OVERRIDE = { # mirrors that rate-limit get a longer pause so we don't trip their 429
     "https://overpass-api.de/api/interpreter": 2.5,
-    "https://overpass.openstreetmap.fr/api/interpreter": 2.0,
 }
+# Polite backoff-and-retry: when a mirror answers with a THROTTLE/OVERLOAD status (it's up, just
+# saying "slow down" / "busy") we wait and try the SAME mirror again instead of giving up. A
+# timeout or connection error is NOT retried here - that means the mirror is unresponsive, so we
+# fail over to the next mirror at once and let the circuit breaker drop a dead one fast.
+OVERPASS_RETRY_CODES = frozenset({429, 500, 502, 503, 504})  # "busy, come back" - worth retrying
+OVERPASS_RETRIES = 2          # extra attempts on a throttle/overload response (so up to 3 total)
+OVERPASS_RETRY_BASE_S = 3.0   # first backoff wait; doubles each retry (+ jitter), capped below
+OVERPASS_RETRY_CAP_S = 30.0   # never back off longer than this per wait
+OVERPASS_RETRY_AFTER_CAP_S = 60.0  # honor a server-sent Retry-After header up to this many seconds
 # Optional alternative POI source: Overture Maps "places" (open, CDLA-Permissive 2.0). Vastly
 # better business coverage than OSM in many regions, worldwide. Needs the `duckdb` package
 # (pip install duckdb, ~10MB, no other deps) - stays out of the default OSM path entirely.
@@ -548,6 +560,46 @@ def _mirror_pause(url):
     return OVERPASS_PAUSE_OVERRIDE.get(url, OVERPASS_PAUSE_S)
 
 
+def _retry_after_secs(err):
+    """Seconds to wait from an HTTPError's `Retry-After` header, or None. Honors the common
+    integer-seconds form (capped for safety); an HTTP-date form returns None so the caller uses
+    its own backoff instead of trusting an arbitrary absolute time."""
+    try:
+        ra = (err.headers.get("Retry-After") or "").strip()
+    except Exception:
+        ra = ""
+    if ra.isdigit():
+        return min(float(ra), OVERPASS_RETRY_AFTER_CAP_S)
+    return None
+
+
+def fetch_pois_polite(south, west, north, east, timeout=OVERPASS_TIMEOUT, url=None,
+                      retries=OVERPASS_RETRIES, on_wait=None, _sleep=time.sleep):
+    """fetch_pois with polite backoff-and-retry on a throttle/overload RESPONSE (HTTP 429/50x):
+    the mirror is up but busy, so we wait - honoring its Retry-After when it sends one, else an
+    exponential backoff (3s, 6s, ...) with jitter, capped - and try the SAME mirror again, up to
+    `retries` times. A timeout / connection error is NOT retried here: an unresponsive mirror is
+    re-raised at once so the caller fails over to the next mirror (and the circuit breaker drops a
+    dead one fast). Any other error (bad query, 403, ...) also re-raises immediately. `on_wait
+    (attempt, secs, code)` is an optional logging hook; `_sleep` is injectable for tests."""
+    import urllib.error
+    attempt = 0
+    while True:
+        try:
+            return fetch_pois(south, west, north, east, timeout=timeout, url=url)
+        except urllib.error.HTTPError as err:
+            if err.code not in OVERPASS_RETRY_CODES or attempt >= retries:
+                raise                          # not a "busy" code, or out of retries -> give up
+            wait = _retry_after_secs(err)
+            if wait is None:                   # no usable Retry-After -> exponential backoff + jitter
+                wait = min(OVERPASS_RETRY_BASE_S * (2 ** attempt), OVERPASS_RETRY_CAP_S)
+                wait += random.uniform(0, 0.5 * OVERPASS_RETRY_BASE_S)
+            if on_wait:
+                on_wait(attempt + 1, wait, err.code)
+            _sleep(wait)
+            attempt += 1
+
+
 def _poi_cache_get(bbox, cache_dir, ttl_days=POI_CACHE_TTL_DAYS):
     """Cached POIs for a snapped tile bbox, or None on a miss/stale/unreadable entry."""
     path = _poi_cache_path(bbox, cache_dir)
@@ -597,19 +649,27 @@ def fetch_pois_tiled(hole_cells, dlat, dlon, refresh=False, cache_dir=None,
     a hole, each cached, politely paced (longer for rate-limiting mirrors). Mirror handling:
       - a tile is tried against the live mirrors in order (primary first); the first that
         answers wins, so a bad tile fails over to the next mirror immediately;
-      - a CIRCUIT BREAKER drops any mirror that fails `max_fail_streak` tiles in a row - it
+      - a mirror that answers "busy" (HTTP 429/50x) gets a POLITE BACKOFF-AND-RETRY on the same
+        mirror (fetch_pois_polite) before it counts as a failure - so a merely-throttled Overpass
+        day completes (slowly) instead of collapsing;
+      - a CIRCUIT BREAKER drops any mirror that still fails `max_fail_streak` tiles in a row - it
         won't be tried again for the rest of the sweep (no more waiting on a dead server);
       - a success resets that mirror's streak.
     A tile that no live mirror can serve is counted failed and skipped (partial list, never a
     wipe; failures aren't cached). Returns (pois, stats) with stats = {tiles, hits, queried,
-    failed, dropped:[urls]}. `pause` overrides per-mirror pacing when given (0 disables it)."""
+    failed, retries, dropped:[urls]} (retries = polite backoff waits across the sweep). `pause`
+    overrides per-mirror pacing when given (0 disables it)."""
     if cache_dir is None:
         cache_dir = POI_CACHE_DIR
     tiles = hole_tiles(hole_cells, dlat, dlon)
     active = list(urls or OVERPASS_URLS)       # live mirrors, in preference order
     streak = {u: 0 for u in active}
     pois = []
-    stats = {"tiles": len(tiles), "hits": 0, "queried": 0, "failed": 0, "dropped": []}
+    stats = {"tiles": len(tiles), "hits": 0, "queried": 0, "failed": 0, "retries": 0, "dropped": []}
+
+    def _note_wait(attempt, secs, code):       # a mirror said "busy" - we're backing off politely
+        stats["retries"] += 1
+
     for i, tile in enumerate(tiles):
         bbox = _snap_bbox(*tile)
         cached = None if refresh else _poi_cache_get(bbox, cache_dir, ttl_days)
@@ -622,7 +682,7 @@ def fetch_pois_tiled(hole_cells, dlat, dlon, refresh=False, cache_dir=None,
         tile_pois, used = None, None
         for url in list(active):               # snapshot: we may drop from `active` mid-loop
             try:
-                tile_pois = fetch_pois(*bbox, timeout=timeout, url=url)
+                tile_pois = fetch_pois_polite(*bbox, timeout=timeout, url=url, on_wait=_note_wait)
                 _poi_cache_put(bbox, cache_dir, tile_pois)
                 streak[url] = 0                # success clears this mirror's streak
                 used = url
@@ -1298,9 +1358,10 @@ def parse_args():
                    help=f"minutes of gap that separates one run from the next (default {RUN_GAP_MIN})")
     g.add_argument("--pois", action=argparse.BooleanOptionalAction, default=True,
                    help="name the businesses inside each hole (on by default; --no-pois to skip)")
-    g.add_argument("--poi-source", choices=POI_SOURCES, default="osm", metavar="SRC",
-                   help="where business names come from: 'osm' (default, no setup) or 'overture' "
-                        "(far better coverage; needs: pip install duckdb)")
+    g.add_argument("--poi-source", choices=POI_SOURCES, default="overture", metavar="SRC",
+                   help="where business names come from: 'overture' (default, far better coverage; "
+                        "needs: pip install duckdb) or 'osm' (no setup). Without duckdb the default "
+                        "auto-falls back to osm.")
     g.add_argument("--overture-confidence", type=float, default=OVERTURE_MIN_CONFIDENCE, metavar="C",
                    help=f"Overture only: drop places below this confidence 0-1 (default {OVERTURE_MIN_CONFIDENCE})")
     g.add_argument("--max-pois-per-hole", type=int, default=MAX_POIS_PER_HOLE, metavar="N",
@@ -1485,11 +1546,11 @@ def run(args):
         if not hole_cells:
             print("no holes to look up businesses for.")
         else:
-            source = getattr(args, "poi_source", "osm")
+            source = getattr(args, "poi_source", "overture")
             if source == "overture" and _load_duckdb() is None:
-                print(f"  {C.yellow}!! --poi-source overture needs DuckDB.{C.reset} Install it once: "
-                      f"{C.b}pip install duckdb{C.reset} {C.dim}(~10MB, one package){C.reset}")
-                print("     falling back to OpenStreetMap for this run.")
+                print(f"  {C.dim}Overture needs DuckDB (not installed) - using OpenStreetMap "
+                      f"instead.{C.reset} For richer coverage: {C.b}pip install duckdb{C.reset} "
+                      f"{C.dim}(~10MB, one package){C.reset}")
                 source = "osm"
             poi_attrib = POI_ATTRIB.get(source, POI_ATTRIB["osm"])
             refresh = getattr(args, "refresh_pois", False)
@@ -1523,9 +1584,12 @@ def run(args):
                 pois, stats = fetch_pois_tiled(hole_cells, dlat, dlon, refresh=refresh, on_progress=_prog)
                 poi_secs = time.perf_counter() - t_poi
                 sys.stdout.write("\n")
+                retried = stats.get("retries", 0)
                 print(f"  OSM lookup: {_fmt_secs(poi_secs)}  "
                       f"{C.dim}({stats['queried']} queried, {stats['hits']} cached, "
-                      f"{stats['failed']} failed){C.reset}")
+                      f"{stats['failed']} failed"
+                      f"{f', {retried} polite backoff' + ('s' if retried != 1 else '') if retried else ''})"
+                      f"{C.reset}")
                 if stats.get("dropped"):
                     names = ", ".join(_mirror_name(u) for u in stats["dropped"])
                     print(f"  {C.yellow}note:{C.reset} dropped {names} after "
@@ -1605,7 +1669,7 @@ def _menu_status(st):
     mode = ("run %d" % st["run"] if st["mode"] == "run"
             else "date %s" % st["date"] if st["mode"] == "date" else "entire-DB / union")
     b, r, g, m = C.b, C.reset, C.green, C.magenta
-    src = st.get("poi_source", "osm")
+    src = st.get("poi_source", "overture")
     print()
     print(f" {C.b}{C.cyan}wigle-coverage{r}")
     print(_rule("="))
@@ -1628,8 +1692,8 @@ def _menu_help():
     print(f"  {y}data{r} <path>    read a different folder")
     print(f"  {y}pois{r}           toggle naming businesses in holes")
     print(_rule(label="POI source - where the business names come from"))
-    print(f"  {m}{C.b}source{r}         switch  {m}{C.b}osm{r} (zero-setup)  <->  {m}{C.b}overture{r} "
-          f"(far more businesses; pip install duckdb)")
+    print(f"  {m}{C.b}source{r}         switch  {m}{C.b}overture{r} (default; far more businesses; "
+          f"pip install duckdb)  <->  {m}{C.b}osm{r} (zero-setup)")
     print(_rule(label="go"))
     print(f"  {y}go{r} (or Enter)  build + open the map    {y}help{r}   commands    {y}q{r}   quit")
     print(_rule("="))
@@ -1664,7 +1728,7 @@ def _menu_namespace(st, list_runs=False):
         run_gap=st["run_gap"], track_gap=st["track_gap"], list_runs=list_runs,
         run=st["run"] if st["mode"] == "run" else None,
         date=st["date"] if st["mode"] == "date" else None,
-        pois=st.get("pois", True), poi_source=st.get("poi_source", "osm"),
+        pois=st.get("pois", True), poi_source=st.get("poi_source", "overture"),
         overture_confidence=OVERTURE_MIN_CONFIDENCE, hotspot=None,
         max_pois_per_hole=MAX_POIS_PER_HOLE, max_pois=MAX_POIS_TOTAL,
         refresh_pois=False, out=None, no_open=True, menu=False)
@@ -1674,7 +1738,7 @@ def interactive_menu(args):
     st = {"data": args.data or DATA_DIR, "cell_size": args.cell_size, "min_obs": args.min_obs,
           "hole_threshold": args.hole_threshold, "run_gap": args.run_gap,
           "track_gap": args.track_gap, "mode": "all", "run": None, "date": None,
-          "pois": getattr(args, "pois", True), "poi_source": getattr(args, "poi_source", "osm")}
+          "pois": getattr(args, "pois", True), "poi_source": getattr(args, "poi_source", "overture")}
     _redraw(st)
     while True:
         try:
@@ -1721,7 +1785,7 @@ def interactive_menu(args):
                 st["pois"] = not st.get("pois", False)
                 _redraw(st, changed=f"pois -> {'on' if st['pois'] else 'off'}")
             elif cmd in ("source", "poi", "poi-source"):
-                st["poi_source"] = "overture" if st.get("poi_source", "osm") == "osm" else "osm"
+                st["poi_source"] = "osm" if st.get("poi_source", "overture") == "overture" else "overture"
                 note = None
                 if st["poi_source"] == "overture" and _load_duckdb() is None:
                     note = (f"  {C.yellow}heads-up:{C.reset} Overture needs DuckDB - "

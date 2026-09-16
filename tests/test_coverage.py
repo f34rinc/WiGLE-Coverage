@@ -10,6 +10,7 @@ import os
 import sys
 import math
 import unittest
+import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import wigle_coverage as wc  # noqa: E402
@@ -497,7 +498,7 @@ class TestMirrorFallback(unittest.TestCase):
 
         def fake(s, w, n, e, timeout=60, url=None):
             seen.append(url)
-            if url == wc.OVERPASS_URLS[0]:            # primary (kumi) is down for this tile
+            if url == wc.OVERPASS_URLS[0]:            # primary mirror is down for this tile
                 raise RuntimeError("HTTP Error 504")
             return [wc.POI("ok", "shop", 0.0, 0.0, "", "", "", "")]
 
@@ -527,6 +528,83 @@ class TestMirrorFallback(unittest.TestCase):
         self.assertEqual(calls[wc.OVERPASS_URLS[0]], 2)           # tried exactly twice, then ignored
         self.assertEqual(stats["failed"], 0)                     # the fallback served every tile
         self.assertEqual(len(pois), 5)
+
+
+class TestPoliteRetry(unittest.TestCase):
+    """fetch_pois_polite: back off + retry a mirror that answers 'busy' (429/50x); fail fast on a
+    hard error (403), a timeout, or a dead connection so the caller can fail over."""
+    def setUp(self):
+        self._fetch = wc.fetch_pois
+        self.waits = []                       # seconds passed to our injected sleep, in order
+
+    def tearDown(self):
+        wc.fetch_pois = self._fetch
+
+    def _http_error(self, code, retry_after=None):
+        import io
+        from email.message import Message
+        hdrs = Message()
+        if retry_after is not None:
+            hdrs["Retry-After"] = retry_after
+        return urllib.error.HTTPError("http://mirror/api", code, "busy", hdrs, io.BytesIO(b""))
+
+    def _record(self, secs):
+        self.waits.append(secs)
+
+    def test_backs_off_then_succeeds_on_429(self):
+        seq = [self._http_error(429)]         # busy once, then serves
+        def fake(*a, **k):
+            if seq:
+                raise seq.pop(0)
+            return [poi("ok")]
+        wc.fetch_pois = fake
+        out = wc.fetch_pois_polite(0, 0, 1, 1, _sleep=self._record)
+        self.assertEqual([p.name for p in out], ["ok"])
+        self.assertEqual(len(self.waits), 1)              # backed off exactly once, then succeeded
+
+    def test_gives_up_after_max_retries(self):
+        def fake(*a, **k):
+            raise self._http_error(503)
+        wc.fetch_pois = fake
+        with self.assertRaises(urllib.error.HTTPError):
+            wc.fetch_pois_polite(0, 0, 1, 1, retries=2, _sleep=self._record)
+        self.assertEqual(len(self.waits), 2)              # slept `retries` times, then re-raised
+
+    def test_does_not_retry_a_hard_4xx(self):
+        def fake(*a, **k):
+            raise self._http_error(403)       # forbidden (e.g. blocked UA) - retrying is pointless
+        wc.fetch_pois = fake
+        with self.assertRaises(urllib.error.HTTPError):
+            wc.fetch_pois_polite(0, 0, 1, 1, _sleep=self._record)
+        self.assertEqual(self.waits, [])
+
+    def test_does_not_retry_a_timeout(self):
+        def fake(*a, **k):
+            raise TimeoutError("read timed out")   # unresponsive mirror -> fail over, don't wait
+        wc.fetch_pois = fake
+        with self.assertRaises(TimeoutError):
+            wc.fetch_pois_polite(0, 0, 1, 1, _sleep=self._record)
+        self.assertEqual(self.waits, [])
+
+    def test_honors_retry_after_header(self):
+        seq = [self._http_error(429, retry_after="7")]
+        def fake(*a, **k):
+            if seq:
+                raise seq.pop(0)
+            return [poi("ok")]
+        wc.fetch_pois = fake
+        wc.fetch_pois_polite(0, 0, 1, 1, _sleep=self._record)
+        self.assertEqual(self.waits, [7.0])               # waited exactly what the server asked for
+
+    def test_retry_after_is_capped(self):
+        seq = [self._http_error(429, retry_after="99999")]   # absurd -> clamped to the cap
+        def fake(*a, **k):
+            if seq:
+                raise seq.pop(0)
+            return [poi("ok")]
+        wc.fetch_pois = fake
+        wc.fetch_pois_polite(0, 0, 1, 1, _sleep=self._record)
+        self.assertEqual(self.waits, [wc.OVERPASS_RETRY_AFTER_CAP_S])
 
 
 if __name__ == "__main__":

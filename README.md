@@ -17,7 +17,7 @@ python wigle_coverage.py
 #  data   | ./data   (backup: WiGLE Database Backup.sqlite)
 #  grid   | cell 50 m | min-obs 2 | hole 5
 #  mode   | entire-DB / union   |  pois on
-#  source | OSM      (where the business names come from)
+#  source | Overture (where the business names come from; OSM fallback w/o duckdb)
 #  > runs         list your sessions         > run 3     map just that walk
 #  > source       osm <-> overture           > cell 75   tweak the grid
 #  > go           build + open the map
@@ -94,7 +94,7 @@ The full flag list (grouped as `python wigle_coverage.py --help` prints them):
 | `--date YYYY-MM-DD` | – | map only that local date |
 | `--run-gap MIN` | 30 | gap separating one run from the next |
 | `--pois` / `--no-pois` | on | name the businesses in each hole |
-| `--poi-source SRC` | `osm` | `osm`, or `overture` (needs `pip install duckdb`) |
+| `--poi-source SRC` | `overture` | `overture` (needs `pip install duckdb`; auto-falls back to `osm` without it), or `osm` (no setup) |
 | `--overture-confidence C` | 0.5 | Overture: min confidence, 0–1 |
 | `--max-pois-per-hole N` | 4 | max shown per hole; rest → "+N more" (0 = off) |
 | `--max-pois N` | 100 | max total, richest holes first (0 = off) |
@@ -184,9 +184,11 @@ than streets. Refresh the bundled Leaflet with `python scripts/vendor_leaflet.py
 
 ### Target the holes: name the businesses (POIs)
 
-**On by default:** every run asks **OpenStreetMap** (via the Overpass API) what named
-businesses sit inside each *hole* — turning "empty cell here" into a concrete hit-list for
-your next run. Pass **`--no-pois`** to skip the lookup (or toggle `pois` in the menu).
+**On by default:** every run looks up what named businesses sit inside each *hole* — turning
+"empty cell here" into a concrete hit-list for your next run. The source is **Overture Maps** by
+default (with an automatic **OpenStreetMap** fallback when DuckDB isn't installed — see
+[Default source](#default-source-overture-maps-with-a-zero-setup-osm-fallback) below). Pass
+**`--no-pois`** to skip the lookup (or toggle `pois` in the menu).
 
 ```
 python wigle_coverage.py
@@ -205,11 +207,11 @@ You get the same list **four ways**, so you can plan at the desk and work off it
   open it on your phone. No network needed once saved;
 - in a plain **`*_targets.txt`** (same grouping + addresses) for grepping/scripting.
 
-> **Addresses come from OpenStreetMap and coverage varies worldwide** — dense in much of
-> Europe/North America, thinner elsewhere. When a business has no `addr:*` tags the sheet falls
-> back gracefully (the coordinate still powers the map link), and postcode-less holes drop to the
-> neighborhood or "unlocated" section. We read the address tags from the *same* query — **no extra
-> load** on OSM.
+> **Addresses come from the POI source and coverage varies worldwide** — Overture tends to be
+> cleaner and denser; OSM (the fallback) is strong in much of Europe/North America, thinner
+> elsewhere. When a business has no address the sheet falls back gracefully (the coordinate still
+> powers the map link), and postcode-less holes drop to the neighborhood or "unlocated" section.
+> Addresses ride along in the *same* query — **no extra requests** to the source.
 
 **Kept manageable.** The list is trimmed so it stays useful, not overwhelming:
 
@@ -220,46 +222,60 @@ You get the same list **four ways**, so you can plan at the desk and work off it
 
 Set either to `0` to lift that cap.
 
-### More coverage: Overture Maps (optional)
+### Default source: Overture Maps (with a zero-setup OSM fallback)
 
-OSM business coverage is thin in a lot of the world. If your area comes up sparse, switch the
-source to **[Overture Maps](https://overturemaps.org/) places** — an open dataset
-(CDLA-Permissive 2.0) that blends Meta + Microsoft + OSM data, so it's *far* denser on actual
-businesses, worldwide, with clean addresses and postcodes.
+Business names come from **[Overture Maps](https://overturemaps.org/) places** by default — an
+open dataset (CDLA-Permissive 2.0) that blends Meta + Microsoft + OSM data, so it's *far* denser
+on actual businesses, worldwide, with clean addresses and postcodes — and, unlike Overpass, it
+reads from a stable cloud file instead of a live server that can be overloaded or rate-limited.
 
 ```
 pip install duckdb                                  # one ~10 MB package, no other deps
-python wigle_coverage.py --poi-source overture      # (or toggle `source` in the menu)
+python wigle_coverage.py <exports>                  # Overture is the default
 ```
 
 That's the whole setup. It runs **one query** over your area (DuckDB reads Overture's cloud
-Parquet, pruned to your bounding box) and caches the result like OSM, so re-runs are instant.
+Parquet, pruned to your bounding box) and caches the result, so re-runs are instant.
 `--overture-confidence C` drops low-confidence places (default `0.5`). In a real Rio run this
 pulled **497 businesses into 96 holes in ~13 s**, versus 71 across 36 holes from OSM.
 
-The default stays **`osm`** — no install, nothing changes — so Overture costs the 99% of users
-nothing. If you pass `--poi-source overture` without DuckDB, the tool tells you the one-line
-install and falls back to OSM for that run. POIs are © Overture Maps Foundation (which includes
-© OpenStreetMap, ODbL); the outputs carry that attribution automatically.
+**Don't have DuckDB? Nothing breaks.** With no `duckdb` installed the tool prints a one-line
+note and **auto-falls back to OpenStreetMap** for the run — so it still works out of the box with
+zero setup; installing DuckDB just unlocks the richer default. Force OSM any time with
+`--poi-source osm` (or toggle `source` in the menu). POIs are © Overture Maps Foundation (which
+includes © OpenStreetMap, ODbL); the outputs carry the right attribution automatically.
 
-**Gentle to OpenStreetMap.** Instead of one big citywide bounding box (which the Overpass server
-will time out with a `504` on a large entire-DB view), the lookup walks the area **one small
+**Gentle to OpenStreetMap.** When the OSM fallback is in play (no DuckDB, or `--poi-source osm`),
+the lookup is careful with the volunteer-run Overpass servers. Instead of one big citywide
+bounding box (which the Overpass server will time out with a `504` on a large entire-DB view),
+the lookup walks the area **one small
 ~1 km tile at a time, only over tiles that actually contain a hole** — each tile **cached
 locally** (`./.poi_cache/`, ~30 days, git-ignored) and **politely paced**. So re-running over the
 same ground (tweaking `--cell-size`, `--min-obs`, …) doesn't re-query OSM at all, and a hiccup on
 one tile yields a **partial** list rather than wiping it (failed tiles aren't cached — re-run to
 fill them in). Pass **`--refresh-pois`** to force a fresh pull.
 
-Queries go to the **kumi.systems** mirror by default (well-resourced and minutely-fresh, so it's
-much faster than the busy reference instance) and **fall back through `overpass-api.de`,
-`private.coffee`, and the French instance** in turn — all equally up to date. Three things keep a
-bad Overpass day from becoming a 15-minute crawl:
+Queries go to the **`overpass-api.de`** reference instance by default — a touch slower and it
+rate-limits (so we pace it), but reliably up when the community mirrors are struggling — and
+**fall back to `kumi.systems`** (fast and un-throttled when it's healthy, but it has flaky
+spells). Both are equally up to date. A few things keep a bad Overpass day from becoming a
+15-minute crawl:
 
 - a **short per-tile timeout**, so a slow/dead tile bails in seconds instead of ~40s;
-- a **circuit breaker** — if a mirror fails **two tiles in a row**, it's dropped for the rest of
-  the run (no more waiting on a server that's down); the other mirror carries on;
+- **polite backoff-and-retry** — if a mirror answers *busy* (`429 Too Many Requests` or a `50x`),
+  it's up and just asking us to slow down, so we wait (honoring its `Retry-After` when it sends
+  one, else an exponential backoff) and retry the **same** mirror before giving up — so a merely
+  *throttled* Overpass day completes (slowly) instead of collapsing;
+- a **circuit breaker** — if a mirror still fails **two tiles in a row** (a timeout or a dead
+  connection, i.e. genuinely down — not a *busy* reply), it's dropped for the rest of the run; the
+  other mirror carries on;
 - **per-mirror pacing** — the reference instance is paced more slowly so we don't trip its rate
-  limit (`429`).
+  limit (`429`) in the first place.
+
+*(Two former mirrors were dropped in Sept 2026: `overpass.private.coffee` turned out to share
+`kumi.systems`' server and IP — a redundant duplicate that failed in lockstep — and the French
+instance `overpass.openstreetmap.fr` began returning `403 Forbidden` to the tool's requests. If
+Overpass is having a rough day everywhere, `--poi-source overture` skips it entirely.)*
 
 POIs are © OpenStreetMap contributors (ODbL); treat the result as a "known targets" list, not an
 exhaustive one.
@@ -274,10 +290,10 @@ useful to you, please consider chipping in to the projects that make it possible
   <https://supporting.openstreetmap.org/donate/> (or via
   [OpenStreetMap Germany](https://www.openstreetmap.de/spenden/)).
 - **Overpass API** — the query service that names the businesses in your holes. The software is
-  free and open (AGPL, by Roland Olbricht). Its reference instance `overpass-api.de` — our
-  fallback mirror — is operated by the non-profit **FOSSGIS e.V.**; donate at
+  free and open (AGPL, by Roland Olbricht). Its reference instance `overpass-api.de` — the mirror
+  this tool queries **by default** — is operated by the non-profit **FOSSGIS e.V.**; donate at
   <https://www.fossgis.de/verein/spenden/> (German page; PayPal or bank transfer).
-- **kumi.systems** — the fast Overpass mirror this tool queries **by default**, run *free for the
+- **kumi.systems** — the fast Overpass mirror this tool uses as a **fallback**, run *free for the
   community* by [Kumi Systems](https://kumi.systems/). They don't solicit public donations — the
   way to support them is a thank-you and, if you ever need paid hosting, keeping them in mind.
 
