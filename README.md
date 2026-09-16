@@ -60,6 +60,18 @@ coverage **and** path **and** run-slicing from that one file.
 
 ## Use it
 
+<p align="center">
+  <img src="docs/terminal-menu.svg" width="820"
+       alt="The interactive terminal menu: a status panel (data, found, grid, mode, source) above the command list — view / tune / POI source / go.">
+</p>
+
+**Terminal interface:** run it with **no arguments** — or add **`-i`** / **`--menu`** — to drop
+into an interactive menu. It reads your `./data` folder, shows the current settings as a panel,
+and lets you set things up by typing short commands: pick a **view** (`runs`, `run 3`,
+`date 2026-09-15`), tune the **grid** (`cell 75`, `min 2`, `hole 5`), toggle **`pois`** or switch
+the POI **`source`**, then **`go`** (or just Enter) to build and open the map. Each change clears
+and redraws the panel so you always see the live state; **`help`** lists everything, **`q`** quits.
+
 **Drag-and-drop (Windows):** drop one or more `.kml` / WiGLE `.csv` files — or the
 whole `WiGLE data` folder — onto `wigle_coverage.py`. It unions everything, builds
 the map, and opens it in your browser.
