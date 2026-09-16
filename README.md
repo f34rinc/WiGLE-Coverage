@@ -293,9 +293,16 @@ here is uploaded or published, even though this repo is private.
 
 ## What it is / isn't
 
-- **Is:** a fast, dependency-free (stdlib) coverage + gap planner. Uses the AP
-  locations in your exports as a proxy for where you passed.
-- **Isn't (yet):** street-level routing or population weighting — see below.
+- **Is:** a fast, dependency-free (stdlib) coverage + gap **planner** — it answers
+  *"where haven't I mapped yet, and where should I wardrive next?"* It bins the AP
+  locations in your exports into cells as a proxy for where you passed.
+- **Isn't a network locator.** It deliberately does **not** plot your individual
+  captured SSIDs on the map — that's not the point. This tool is about **coverage and
+  planning the next wardrive**, not looking up where a specific network lives. To find a
+  given network's location, use **[WiGLE](https://wigle.net)** itself. (The counts and
+  the hotspot circles are *aggregate per-cell* totals; the hole popups name nearby
+  *businesses* to target — never your own SSIDs.)
+- **Isn't (yet):** street-level routing or population weighting — see the roadmap below.
 
 ## Roadmap
 
