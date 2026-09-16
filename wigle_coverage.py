@@ -180,6 +180,7 @@ class _C:
         self.reset = e("\033[0m"); self.b = e("\033[1m"); self.dim = e("\033[2m")
         self.cyan = e("\033[36m"); self.yellow = e("\033[33m")
         self.green = e("\033[32m"); self.red = e("\033[31m")
+        self.magenta = e("\033[35m")   # reserved for the POI-source selector (its own accent)
 
 
 def setup_color():
@@ -1601,19 +1602,21 @@ def _menu_status(st):
         found = C.red + "empty - drop KML/CSV or a .sqlite backup here" + C.reset
     mode = ("run %d" % st["run"] if st["mode"] == "run"
             else "date %s" % st["date"] if st["mode"] == "date" else "entire-DB / union")
-    b, r, g = C.b, C.reset, C.green
+    b, r, g, m = C.b, C.reset, C.green, C.magenta
+    src = st.get("poi_source", "osm")
     print()
     print(f" {C.b}{C.cyan}wigle-coverage{r}")
     print(_rule("="))
     print(f"  {b}data {r} | {st['data']}")
     print(f"  {b}found{r} | {found}")
     print(f"  {b}grid {r} | cell {g}{st['cell_size']:.0f} m{r} | min-obs {st['min_obs']} | hole {st['hole_threshold']}")
-    print(f"  {b}mode {r} | {g}{mode}{r}  |  pois {'on' if st.get('pois') else 'off'}"
-          f"  |  source {g}{st.get('poi_source', 'osm')}{r}")
+    print(f"  {b}mode {r} | {g}{mode}{r}  |  pois {'on' if st.get('pois') else 'off'}")
+    print(f"  {b}{m}source{r} | {m}{b}{src.upper()}{r}  {C.dim}where business names come from "
+          f"({'zero-setup' if src == 'osm' else 'needs duckdb'}){r}")
 
 
 def _menu_help():
-    y, r = C.yellow, C.reset
+    y, r, m = C.yellow, C.reset, C.magenta
     print(_rule(label="view - which slice to map"))
     print(f"  {y}all{r}            whole history / union   {C.dim}(default){r}")
     print(f"  {y}runs{r}           list the sessions in the backup")
@@ -1622,7 +1625,9 @@ def _menu_help():
     print(f"  {y}cell{r} N         grid size (m)   {y}min{r} N   min obs   {y}hole{r} N   hole threshold")
     print(f"  {y}data{r} <path>    read a different folder")
     print(f"  {y}pois{r}           toggle naming businesses in holes")
-    print(f"  {y}source{r}         switch POI source: osm <-> overture {C.dim}(needs duckdb){C.reset}")
+    print(_rule(label="POI source - where the business names come from"))
+    print(f"  {m}{C.b}source{r}         switch  {m}{C.b}osm{r} {C.dim}(zero-setup){r}  <->  {m}{C.b}overture{r} "
+          f"{C.dim}(far more businesses; pip install duckdb){r}")
     print(_rule(label="go"))
     print(f"  {y}go{r} (or Enter)  build + open the map    {y}help{r}   commands    {y}q{r}   quit")
     print(_rule("="))
