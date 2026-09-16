@@ -107,7 +107,7 @@ The full flag list (grouped as `python wigle_coverage.py --help` prints them):
 | `--cell-size M` | 50 | grid cell edge, metres (~half a block; below ~25 m just maps GPS scatter) |
 | `--min-obs N` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
 | `--hole-threshold N` | 5 | covered neighbours (of 8) for a "hole" vs an "edge" |
-| `--hotspot N` | adaptive | WiGLE-style circles at cells with ≥ N networks (default: your top 10% densest; 0 = off) |
+| `--hotspot N` | adaptive | circles on cells with ≥ N networks (default: top 10%; 0 = off) |
 | `--track-gap MIN` | 5 | minutes between GPS fixes that starts a new path segment |
 
 **Interface + output**
