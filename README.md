@@ -26,7 +26,7 @@ python wigle_coverage.py
 Out of the box you get **coverage + the holes/edges to fill next**, your walked **track**,
 the **businesses named inside each hole** (a gap becomes a hit-list), and a **Hotspots**
 layer marking your densest cells. `-i` / `--menu` forces the menu even with other flags;
-`--data DIR` points at a different folder. Everything also works as one-shot CLI flags for
+`--data DIR` points at a different folder. Everything also works as one-shot CLI flags for
 scripting (full list under [Command line](#use-it)).
 
 ## Best input: the WiGLE "Database Backup" (`.sqlite`)
@@ -36,7 +36,7 @@ tool, because it carries everything in one place:
 
 - **coverage** — every network's location (where you were),
 - **your actual track path** — the timestamped GPS breadcrumb (drawn as the blue line), and
-- **timestamps** — which unlock the run views (`--list-runs`, `--run N`, `--date`).
+- **timestamps** — which unlock the run views (`--list-runs`, `--run N`, `--date`).
 
 A KML/CSV export has *none* of the track or timing — just network locations — so a backup
 alone does more than a whole folder of KMLs. Drop one in `data/` (or pass it) and you get
@@ -82,40 +82,40 @@ The full flag list (grouped as `python wigle_coverage.py --help` prints them):
 | flag | meaning |
 |---|---|
 | `paths …` | KML/CSV, a `.sqlite` backup, a folder, or globs; empty = the `./data` folder |
-| `--track` / `--backup` / `--db BACKUP` | the WiGLE `.sqlite` backup — adds your path *and* powers the run views |
-| `--data DIR` | folder to read when no path is given (default: `./data`) |
+| `--track` / `--backup` / `--db BACKUP` | the WiGLE `.sqlite` backup — adds your path *and* powers the run views |
+| `--data DIR` | folder to read when no path is given (default: `./data`) |
 
 **Views — which slice to map**
 
 | flag | default | meaning |
 |---|--:|---|
 | `--list-runs` | – | list the runs (sessions) in the backup, then exit |
-| `--run N` | – | map only run *N* (from `--list-runs`) |
-| `--date YYYY-MM-DD` | – | map only that local date's fixes |
-| `--run-gap MIN` | 30 | gap that separates one run from the next |
+| `--run N` | – | map only run *N* (from `--list-runs`) |
+| `--date YYYY-MM-DD` | – | map only that local date's fixes |
+| `--run-gap MIN` | 30 | gap that separates one run from the next |
 | `--pois` / `--no-pois` | on | name the businesses inside each hole |
-| `--poi-source SRC` | `osm` | `osm` or `overture` (Overture = far better coverage; needs `pip install duckdb`) |
-| `--overture-confidence C` | 0.5 | Overture only: drop places below this confidence (0–1) |
-| `--max-pois-per-hole N` | 4 | cap businesses shown per hole; extras → "+N more" (0 = no cap) |
-| `--max-pois N` | 100 | cap total across holes, richest first (0 = no cap) |
+| `--poi-source SRC` | `osm` | `osm` or `overture` (Overture = far better coverage; needs `pip install duckdb`) |
+| `--overture-confidence C` | 0.5 | Overture only: drop places below this confidence (0–1) |
+| `--max-pois-per-hole N` | 4 | cap businesses shown per hole; extras → "+N more" (0 = no cap) |
+| `--max-pois N` | 100 | cap total across holes, richest first (0 = no cap) |
 | `--refresh-pois` | off | ignore the POI cache and re-query the source |
 
 **Grid + track tuning**
 
 | flag | default | meaning |
 |---|--:|---|
-| `--cell-size M` | 50 | grid cell edge, metres (~half a block; below ~25 m just maps GPS scatter) |
-| `--min-obs N` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
-| `--hole-threshold N` | 5 | covered neighbours (of 8) for a "hole" vs an "edge" |
-| `--hotspot N` | adaptive | WiGLE-style circles at cells with ≥ N networks (default: your top 10% densest; 0 = off) |
-| `--track-gap MIN` | 5 | minutes between GPS fixes that starts a new path segment |
+| `--cell-size M` | 50 | grid cell edge, metres (~half a block; below ~25 m just maps GPS scatter) |
+| `--min-obs N` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
+| `--hole-threshold N` | 5 | covered neighbours (of 8) for a "hole" vs an "edge" |
+| `--hotspot N` | adaptive | WiGLE-style circles at cells with ≥ N networks (default: your top 10% densest; 0 = off) |
+| `--track-gap MIN` | 5 | minutes between GPS fixes that starts a new path segment |
 
 **Interface + output**
 
 | flag | default | meaning |
 |---|--:|---|
 | `-i` / `--menu` | – | interactive menu instead of flags |
-| `--out FILE` | *beside input* | output HTML path |
+| `--out FILE` | *beside input* | output HTML path |
 | `--no-open` | off | don't auto-open the map |
 | `-h` / `--help` | – | print this whole list |
 
@@ -131,7 +131,7 @@ The full flag list (grouped as `python wigle_coverage.py --help` prints them):
 WiGLE-style circles — sized by how many **networks** were captured there, with the count
 labeled on each (click for the exact number). It counts *actual APs* — from the KML/CSV
 directly, or from the SQLite backup's `network` table (not the GPS track). By default it
-shows your **top ~10% densest cells** (adaptive per dataset); `--hotspot N` sets an absolute
+shows your **top ~10% densest cells** (adaptive per dataset); `--hotspot N` sets an absolute
 threshold (only cells with ≥ N networks), and `--hotspot 0` turns it off.
 
 **Your actual path.** Pass `--track "C:\...\WiGLE Database Backup.sqlite"` and the map
@@ -234,7 +234,7 @@ python wigle_coverage.py --poi-source overture      # (or toggle `source` in the
 
 That's the whole setup. It runs **one query** over your area (DuckDB reads Overture's cloud
 Parquet, pruned to your bounding box) and caches the result like OSM, so re-runs are instant.
-`--overture-confidence C` drops low-confidence places (default `0.5`). In a real Rio run this
+`--overture-confidence C` drops low-confidence places (default `0.5`). In a real Rio run this
 pulled **497 businesses into 96 holes in ~13 s**, versus 71 across 36 holes from OSM.
 
 The default stays **`osm`** — no install, nothing changes — so Overture costs the 99% of users
