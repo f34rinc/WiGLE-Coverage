@@ -67,6 +67,7 @@ import math
 import hashlib
 import argparse
 import datetime
+import pathlib
 import webbrowser
 from html import escape as _esc
 from collections import namedtuple, Counter
@@ -1668,7 +1669,7 @@ def interactive_menu(args):
                 out = run(_menu_namespace(st))
                 if out:
                     try:
-                        webbrowser.open("file://" + os.path.abspath(out))
+                        webbrowser.open(pathlib.Path(out).resolve().as_uri())
                     except Exception:
                         pass
             elif cmd == "runs":
@@ -1726,7 +1727,7 @@ def main():
     out = run(args)
     if out and not args.no_open:
         try:
-            webbrowser.open("file://" + os.path.abspath(out))
+            webbrowser.open(pathlib.Path(out).resolve().as_uri())
         except Exception:
             pass
     if _launched_standalone():
