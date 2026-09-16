@@ -1,0 +1,10 @@
+# This file keeps the data/ folder in the repo so it's ready to use.
+#
+# Drop your WiGLE exports here and just run the tool:
+#   - a "Database Backup" .sqlite  (best - coverage + track + run views; extensionless is fine)
+#   - or KML / CSV exports
+#
+# Everything in this folder carries real GPS, so it's ALL ignored (extensionless
+# backups included) - only this .gitignore is tracked. Never commit the exports.
+*
+!.gitignore

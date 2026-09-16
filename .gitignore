@@ -7,8 +7,12 @@
 *.sqlite
 *.db
 *_targets.txt
-data/
 out/
+
+# Ship the data/ folder (so it's ready to drop exports into) but ignore everything
+# in it - see data/.gitignore. Extensionless WiGLE backups are covered by that too.
+data/*
+!data/.gitignore
 
 # your personal map API key - never commit (map_key.txt.example is the template)
 map_key.txt
