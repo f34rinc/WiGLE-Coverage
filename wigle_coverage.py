@@ -177,6 +177,7 @@ def read_map_key():
 # ---- console colour (cross-platform; degrades to plain text) -----------------
 class _C:
     def __init__(self, on):
+        self.on = bool(on)         # a real ANSI terminal -> safe to clear-screen
         e = (lambda s: s if on else "")
         self.reset = e("\033[0m"); self.b = e("\033[1m"); self.dim = e("\033[2m")
         self.cyan = e("\033[36m"); self.yellow = e("\033[33m")
@@ -1634,6 +1635,28 @@ def _menu_help():
     print(_rule("="))
 
 
+def _clear():
+    """Wipe the terminal (screen + scrollback) for a fresh redraw. Only on a real
+    ANSI terminal; when piped/redirected it just prints a divider so output stays sane."""
+    if C.on:
+        sys.stdout.write("\033[2J\033[3J\033[H")   # clear screen + scrollback, cursor home
+        sys.stdout.flush()
+    else:
+        print(_rule("="))
+
+
+def _redraw(st, changed=None, note=None):
+    """Clear and redraw the WHOLE menu (status + help) so a changed setting shows
+    against a fresh panel instead of stacking up. `changed` prints an obvious cue."""
+    _clear()
+    _menu_status(st)
+    if changed:
+        print(f"  {C.b}{C.cyan}>> redrawn{C.reset}  {C.dim}({changed}){C.reset}")
+    if note:
+        print(note)
+    _menu_help()
+
+
 def _menu_namespace(st, list_runs=False):
     return argparse.Namespace(
         paths=[st["data"]], track=None, data=None,
@@ -1652,8 +1675,7 @@ def interactive_menu(args):
           "hole_threshold": args.hole_threshold, "run_gap": args.run_gap,
           "track_gap": args.track_gap, "mode": "all", "run": None, "date": None,
           "pois": getattr(args, "pois", True), "poi_source": getattr(args, "poi_source", "osm")}
-    _menu_status(st)
-    _menu_help()
+    _redraw(st)
     while True:
         try:
             line = input("\n> ").strip()
@@ -1676,36 +1698,37 @@ def interactive_menu(args):
                 run(_menu_namespace(st, list_runs=True))
             elif cmd == "all":
                 st["mode"], st["run"], st["date"] = "all", None, None
-                _menu_status(st)
+                _redraw(st, changed="view -> entire-DB / union")
             elif cmd == "run" and arg:
                 st["mode"], st["run"], st["date"] = "run", int(arg), None
-                _menu_status(st)
+                _redraw(st, changed=f"view -> run {st['run']}")
             elif cmd == "date" and arg:
                 st["mode"], st["date"], st["run"] = "date", arg, None
-                _menu_status(st)
+                _redraw(st, changed=f"view -> date {st['date']}")
             elif cmd == "cell" and arg:
                 st["cell_size"] = float(arg)
-                _menu_status(st)
+                _redraw(st, changed=f"cell -> {st['cell_size']:.0f} m")
             elif cmd == "min" and arg:
                 st["min_obs"] = int(arg)
-                _menu_status(st)
+                _redraw(st, changed=f"min-obs -> {st['min_obs']}")
             elif cmd == "hole" and arg:
                 st["hole_threshold"] = int(arg)
-                _menu_status(st)
+                _redraw(st, changed=f"hole-threshold -> {st['hole_threshold']}")
             elif cmd == "data" and arg:
                 st["data"] = arg
-                _menu_status(st)
+                _redraw(st, changed=f"data -> {st['data']}")
             elif cmd == "pois":
                 st["pois"] = not st.get("pois", False)
-                _menu_status(st)
+                _redraw(st, changed=f"pois -> {'on' if st['pois'] else 'off'}")
             elif cmd in ("source", "poi", "poi-source"):
                 st["poi_source"] = "overture" if st.get("poi_source", "osm") == "osm" else "osm"
+                note = None
                 if st["poi_source"] == "overture" and _load_duckdb() is None:
-                    print(f"  {C.yellow}heads-up:{C.reset} Overture needs DuckDB - "
-                          f"{C.b}pip install duckdb{C.reset} (falls back to OSM until then)")
-                _menu_status(st)
+                    note = (f"  {C.yellow}heads-up:{C.reset} Overture needs DuckDB - "
+                            f"{C.b}pip install duckdb{C.reset} (falls back to OSM until then)")
+                _redraw(st, changed=f"source -> {st['poi_source']}", note=note)
             elif cmd in ("help", "h", "?"):
-                _menu_help()
+                _redraw(st)
             else:
                 print("  unknown command - type 'help'")
         except ValueError:
