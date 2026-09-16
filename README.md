@@ -9,20 +9,25 @@ Output is a **self-contained local Leaflet map** (`.html`) you open in your brow
 
 ## Quick start (no arguments)
 
-Drop your KML/CSV exports and a `.sqlite` backup into the **`data/`** folder beside the
-script, then run it with **no arguments** for an interactive menu:
+Drop your WiGLE **`.sqlite` backup** (or KML/CSV exports) into the **`data/`** folder beside
+the script, then run it with **no arguments** for an interactive menu:
 
 ```
 python wigle_coverage.py
-#   data: ./data   (6 KML/CSV, backup: WiGLE Database Backup.sqlite)
-#   cell 50 m  min-obs 2  mode: entire-DB / union
-#   > runs        # list your sessions
-#   > run 3       # pick one     > cell 75   # tweak
-#   > go          # build + open the map
+#  data   | ./data   (backup: WiGLE Database Backup.sqlite)
+#  grid   | cell 50 m | min-obs 2 | hole 5
+#  mode   | entire-DB / union   |  pois on
+#  source | OSM      (where the business names come from)
+#  > runs         list your sessions         > run 3     map just that walk
+#  > source       osm <-> overture           > cell 75   tweak the grid
+#  > go           build + open the map
 ```
 
-`-i` / `--menu` forces the menu even with other flags; `--data DIR` points at a
-different folder. Everything below still works as one-shot CLI flags for scripting.
+Out of the box you get **coverage + the holes/edges to fill next**, your walked **track**,
+the **businesses named inside each hole** (a gap becomes a hit-list), and a **Hotspots**
+layer marking your densest cells. `-i` / `--menu` forces the menu even with other flags;
+`--data DIR` points at a different folder. Everything also works as one-shot CLI flags for
+scripting (full list under [Command line](#use-it)).
 
 ## Best input: the WiGLE "Database Backup" (`.sqlite`)
 
