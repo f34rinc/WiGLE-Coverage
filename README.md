@@ -70,19 +70,49 @@ the map, and opens it in your browser.
 python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 50 --min-obs 2 --out map.html
 ```
 
+The full flag list (grouped as `python wigle_coverage.py --help` prints them):
+
+**Input — what to read**
+
+| flag | meaning |
+|---|---|
+| `paths …` | KML/CSV, a `.sqlite` backup, a folder, or globs; empty = the `./data` folder |
+| `--track` / `--backup` / `--db BACKUP` | the WiGLE `.sqlite` backup — adds your path *and* powers the run views |
+| `--data DIR` | folder to read when no path is given (default: `./data`) |
+
+**Views — which slice to map**
+
 | flag | default | meaning |
 |---|--:|---|
-| `--cell-size` | 50 | grid cell edge, metres (~half a block; below ~25 m just maps GPS scatter) |
-| `--min-obs` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
-| `--hole-threshold` | 5 | covered neighbours (of 8) for a cell to rank as a "hole" vs an "edge" |
-| `--track` | – | a WiGLE **SQLite backup** — draws your path *and* powers the run views |
-| `--track-gap` | 5 | minutes between GPS fixes that starts a new path segment |
-| `--list-runs` | – | list the runs (sessions) in the backup and exit |
-| `--run` | – | map only run *N* (from `--list-runs`) — that session's coverage + path |
-| `--date` | – | map only the fixes from a local date (`YYYY-MM-DD`) |
-| `--run-gap` | 30 | minutes of gap that separates one run from the next |
-| `--out` | *beside first input* | output HTML path |
+| `--list-runs` | – | list the runs (sessions) in the backup, then exit |
+| `--run N` | – | map only run *N* (from `--list-runs`) |
+| `--date YYYY-MM-DD` | – | map only that local date's fixes |
+| `--run-gap MIN` | 30 | gap that separates one run from the next |
+| `--pois` / `--no-pois` | on | name the businesses inside each hole |
+| `--poi-source SRC` | `osm` | `osm` or `overture` (Overture = far better coverage; needs `pip install duckdb`) |
+| `--overture-confidence C` | 0.5 | Overture only: drop places below this confidence (0–1) |
+| `--max-pois-per-hole N` | 4 | cap businesses shown per hole; extras → "+N more" (0 = no cap) |
+| `--max-pois N` | 100 | cap total across holes, richest first (0 = no cap) |
+| `--refresh-pois` | off | ignore the POI cache and re-query the source |
+
+**Grid + track tuning**
+
+| flag | default | meaning |
+|---|--:|---|
+| `--cell-size M` | 50 | grid cell edge, metres (~half a block; below ~25 m just maps GPS scatter) |
+| `--min-obs N` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
+| `--hole-threshold N` | 5 | covered neighbours (of 8) for a "hole" vs an "edge" |
+| `--hotspot N` | adaptive | WiGLE-style circles at cells with ≥ N networks (default: your top 10% densest; 0 = off) |
+| `--track-gap MIN` | 5 | minutes between GPS fixes that starts a new path segment |
+
+**Interface + output**
+
+| flag | default | meaning |
+|---|--:|---|
+| `-i` / `--menu` | – | interactive menu instead of flags |
+| `--out FILE` | *beside input* | output HTML path |
 | `--no-open` | off | don't auto-open the map |
+| `-h` / `--help` | – | print this whole list |
 
 ## How it reads the map
 
