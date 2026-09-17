@@ -1,5 +1,5 @@
 # GPS-bearing inputs and generated maps carry real coordinates - NEVER commit,
-# even in a private repo (in case it ever flips public or leaks).
+# this repo is PUBLIC, so real coordinates must never be committed.
 *.kml
 *.kmz
 *.csv

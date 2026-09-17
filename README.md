@@ -211,7 +211,7 @@ default (with an automatic **OpenStreetMap** fallback when DuckDB isn't installe
 
 ```
 python wigle_coverage.py
-#   > HOLE @ -22.970, -43.180  (4 targets): Padaria São José · Bar do Zé · Mercado · Farmácia
+#   > HOLE @ 40.700, -73.990  (4 targets): Corner Bakery · City Pharmacy · The Old Anchor Pub · Green Grocer
 ```
 
 You get the same list **four ways**, so you can plan at the desk and work off it in the field:
@@ -255,7 +255,7 @@ python wigle_coverage.py <exports>                  # Overture is the default
 
 That's the whole setup. It runs **one query** over your area (DuckDB reads Overture's cloud
 Parquet, pruned to your bounding box) and caches the result, so re-runs are instant.
-`--overture-confidence C` drops low-confidence places (default `0.5`). In a real Rio run this
+`--overture-confidence C` drops low-confidence places (default `0.5`). In a real dense-city run this
 pulled **497 businesses into 96 holes in ~13 s**, versus 71 across 36 holes from OSM.
 
 **Don't have DuckDB? Nothing breaks.** With no `duckdb` installed the tool prints a one-line
@@ -308,6 +308,14 @@ useful to you, please consider chipping in to the projects that make it possible
   addresses). Donate to the OpenStreetMap Foundation at
   <https://supporting.openstreetmap.org/donate/> (or via
   [OpenStreetMap Germany](https://www.openstreetmap.de/spenden/)).
+- **Overture Maps** — the default POI source (the business names in your holes). It's a
+  Linux Foundation project **funded by member organizations**, so membership is org-level
+  (companies pay tiered dues; qualified non-profits and government bodies may be exempt) — see
+  [become a member](https://overturemaps.org/become-a-member/). There's **no individual donation
+  button**, so as a solo mapper the way to give back is to **improve OpenStreetMap** (Overture's
+  places build heavily on OSM, so your edits flow right back), contribute to their open schema and
+  tools on [GitHub](https://github.com/OvertureMaps), or send open data / feedback to
+  `info@overturemaps.org`.
 - **Overpass API** — the query service that names the businesses in your holes. The software is
   free and open (AGPL, by Roland Olbricht). Its reference instance `overpass-api.de` — the mirror
   this tool queries **by default** — is operated by the non-profit **FOSSGIS e.V.**; donate at
@@ -324,7 +332,7 @@ person's target list better, anywhere in the world.
 
 Your WiGLE exports and the generated map carry **real GPS coordinates**. They stay
 **local** and are git-ignored (`*.kml`, `*.csv`, `*.html`, `data/`, `out/`) — nothing
-here is uploaded or published, even though this repo is private.
+here is uploaded or published — the GPS-bearing files never enter the repo, public though it is.
 
 ## What it is / isn't
 
@@ -343,8 +351,8 @@ here is uploaded or published, even though this repo is private.
 
 - **Streets (phase 2):** overlay the real road network (OpenStreetMap) so
   suggestions are named streets/segments, not just cells.
-- **Demographics (phase 2):** weight suggestions by population density (Brazil IBGE
-  census) so dense uncovered areas rank first.
+- **Demographics (phase 2):** weight suggestions by population density (national census
+  data) so dense uncovered areas rank first.
 
 ## Tests
 
@@ -354,3 +362,9 @@ python -m unittest discover -s tests -v
 
 Stdlib only. Grid conversion, cell binning, coverage counting, and hole/edge
 classification are covered with fabricated coordinates.
+
+## License
+
+**[GPL-3.0-or-later](LICENSE).** Free to use, study, share, and modify — but
+derivative works you distribute must stay open under the same license. See the
+[LICENSE](LICENSE) file for the full text.

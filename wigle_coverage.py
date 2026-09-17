@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+#
+# wigle-coverage - plan your next wardrive from the gaps in your WiGLE coverage.
+# Copyright (C) 2026 f34rinc
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version. It comes WITH NO WARRANTY. See the LICENSE file, or
+# <https://www.gnu.org/licenses/>, for the full text.
 """
 wigle_coverage.py - turn your WiGLE exports into a coverage map that shows where
 you HAVE walked and, more usefully, recommends where you HAVEN'T: the blank cells
