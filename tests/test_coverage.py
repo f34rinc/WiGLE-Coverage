@@ -15,7 +15,7 @@ import urllib.error
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import wigle_coverage as wc  # noqa: E402
 
-LAT = -22.97  # a mid-latitude sample, for realistic dlon/dlat (nothing region-specific)
+LAT = 40.4375  # a mid-latitude sample, for realistic dlon/dlat (nothing region-specific)
 
 
 def poi(name, cat="shop", lat=0.0, lon=0.0, street="", hn="", postcode="", suburb=""):
@@ -33,17 +33,17 @@ class TestGrid(unittest.TestCase):
 
     def test_cell_of_bins_consistently(self):
         dlat, dlon = wc.meters_to_deg(200, LAT)
-        a = wc.cell_of(-22.9700, -43.1800, dlat, dlon)
-        b = wc.cell_of(-22.9701, -43.1801, dlat, dlon)   # ~15 m away -> same cell
+        a = wc.cell_of(40.4375, -111.9255, dlat, dlon)
+        b = wc.cell_of(40.4374, -111.9256, dlat, dlon)   # ~15 m away -> same cell
         self.assertEqual(a, b)
-        c = wc.cell_of(-22.9800, -43.1900, dlat, dlon)    # ~1 km away -> different cell
+        c = wc.cell_of(40.4275, -111.9355, dlat, dlon)    # ~1 km away -> different cell
         self.assertNotEqual(a, c)
 
 
 class TestCoverage(unittest.TestCase):
     def test_build_and_covered(self):
         dlat, dlon = wc.meters_to_deg(200, LAT)
-        pts = [(-22.97, -43.18)] * 3 + [(-22.98, -43.19)] * 1
+        pts = [(40.4375, -111.9255)] * 3 + [(40.4275, -111.9355)] * 1
         cov = wc.build_coverage(pts, dlat, dlon)
         self.assertEqual(sum(cov.values()), 4)
         self.assertEqual(len(cov), 2)
@@ -82,47 +82,47 @@ class TestRecommend(unittest.TestCase):
 class TestTrack(unittest.TestCase):
     def test_gap_splits_segments(self):
         # two clusters ~11 min apart -> two segments (gap threshold 5 min)
-        rows = [(0, -22.97, -43.18), (1000, -22.9702, -43.1802), (2000, -22.9704, -43.1804),
-                (700000, -22.98, -43.19), (701000, -22.9802, -43.1902)]
+        rows = [(0, 40.4375, -111.9255), (1000, 40.4373, -111.9257), (2000, 40.4371, -111.9259),
+                (700000, 40.4275, -111.9355), (701000, 40.4273, -111.9357)]
         segs = wc.build_track_segments(rows, gap_ms=300000, min_move_deg=0.0)
         self.assertEqual(len(segs), 2)
         self.assertEqual([len(s) for s in segs], [3, 2])
 
     def test_jitter_decimated(self):
         # a barely-moving fix between two real ones is dropped
-        rows = [(0, -22.97, -43.18), (1000, -22.970001, -43.180001), (2000, -22.9705, -43.1805)]
+        rows = [(0, 40.4375, -111.9255), (1000, 40.437499, -111.925501), (2000, 40.4370, -111.9260)]
         segs = wc.build_track_segments(rows, gap_ms=300000, min_move_deg=0.0001)
         self.assertEqual(len(segs), 1)
         self.assertEqual(len(segs[0]), 2)   # the sub-threshold jitter point is gone
 
     def test_lone_segment_dropped(self):
         # a single isolated fix can't form a line
-        self.assertEqual(wc.build_track_segments([(0, -22.97, -43.18)], 300000, 0.0), [])
+        self.assertEqual(wc.build_track_segments([(0, 40.4375, -111.9255)], 300000, 0.0), [])
 
 
 class TestSessionize(unittest.TestCase):
     def test_splits_into_runs_on_gap(self):
         # two clusters ~1h apart -> two runs (30-min gap threshold)
         gap = 30 * 60_000
-        fixes = [(0, -22.97, -43.18), (60_000, -22.971, -43.181),
-                 (3_600_000, -22.98, -43.19), (3_660_000, -22.981, -43.191),
-                 (3_720_000, -22.982, -43.192)]
+        fixes = [(0, 40.4375, -111.9255), (60_000, 40.4365, -111.9265),
+                 (3_600_000, 40.4275, -111.9355), (3_660_000, 40.4265, -111.9365),
+                 (3_720_000, 40.4255, -111.9375)]
         runs = wc.sessionize(fixes, gap)
         self.assertEqual(len(runs), 2)
         self.assertEqual([len(r) for r in runs], [2, 3])
 
     def test_single_run_when_no_big_gap(self):
-        fixes = [(t * 60_000, -22.97, -43.18) for t in range(10)]  # 1-min steps, one session
+        fixes = [(t * 60_000, 40.4375, -111.9255) for t in range(10)]  # 1-min steps, one session
         self.assertEqual(len(wc.sessionize(fixes, 30 * 60_000)), 1)
 
 
 class TestPOIs(unittest.TestCase):
     def test_assign_pois_to_holes(self):
         dlat, dlon = wc.meters_to_deg(50, LAT)
-        hole = wc.cell_of(-22.9700, -43.1800, dlat, dlon)
-        other = wc.cell_of(-22.9900, -43.2000, dlat, dlon)   # not a hole
-        pois = [poi("Padaria", "bakery", -22.97001, -43.18001),   # inside the hole cell
-                poi("FarAway", "bar", -22.99001, -43.20001)]      # outside any hole
+        hole = wc.cell_of(40.4375, -111.9255, dlat, dlon)
+        other = wc.cell_of(40.4175, -111.9455, dlat, dlon)   # not a hole
+        pois = [poi("Padaria", "bakery", 40.43749, -111.92551),   # inside the hole cell
+                poi("FarAway", "bar", 40.41749, -111.94551)]      # outside any hole
         got = wc.assign_pois_to_holes(pois, [hole], dlat, dlon)
         self.assertIn(hole, got)
         self.assertEqual([p.name for p in got[hole]], ["Padaria"])
@@ -169,9 +169,9 @@ class TestTargetsHtml(unittest.TestCase):
     def test_doc_shows_address_and_groups_by_postcode(self):
         import tempfile
         dlat, dlon = self._dlatlon()
-        hole = wc.cell_of(-22.9700, -43.1800, dlat, dlon)
+        hole = wc.cell_of(40.4375, -111.9255, dlat, dlon)
         recs = [{"cell": list(hole), "label": "hole", "covered_neighbors": 8}]
-        poi_by_hole = {hole: [poi("Padaria & Café <Zé>", "bakery", -22.97001, -43.18001,
+        poi_by_hole = {hole: [poi("Padaria & Café <Zé>", "bakery", 40.43749, -111.92551,
                                   street="Rua X", hn="502", postcode="22070-011")]}
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "t_targets.html")
@@ -188,9 +188,9 @@ class TestTargetsHtml(unittest.TestCase):
     def test_doc_unlocated_falls_back_to_coordinate(self):
         import tempfile
         dlat, dlon = self._dlatlon()
-        hole = wc.cell_of(-22.9700, -43.1800, dlat, dlon)
+        hole = wc.cell_of(40.4375, -111.9255, dlat, dlon)
         recs = [{"cell": list(hole), "label": "hole", "covered_neighbors": 8}]
-        poi_by_hole = {hole: [poi("Mercadinho", "shop", -22.97001, -43.18001)]}   # no address
+        poi_by_hole = {hole: [poi("Mercadinho", "shop", 40.43749, -111.92551)]}   # no address
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "t_targets.html")
             wc.render_targets_html(p, recs, poi_by_hole, dlat, dlon)
@@ -231,6 +231,23 @@ class TestGroupTargets(unittest.TestCase):
         self.assertEqual(holes[0]["street"], "Main St")        # representative = most common street
 
 
+class TestSnapBbox(unittest.TestCase):
+    def test_grid_aligned_bbox_snaps_to_itself(self):
+        # A tile already on the 0.01 grid must snap to itself. Regression for a float bug:
+        # math.floor(0.59 / 0.01) == 58 (0.59/0.01 is 58.9999...), which widened the tile.
+        g = wc.POI_CACHE_GRID
+        for i in range(0, 200):
+            v = round(i * g, 6)
+            tile = (v, v, round(v + g, 6), round(v + g, 6))
+            self.assertEqual(wc._snap_bbox(*tile), tile)
+
+    def test_mid_cell_bbox_expands_outward(self):
+        g = wc.POI_CACHE_GRID
+        s, w, n, e = 0.445, 0.585, 0.455, 0.595
+        self.assertEqual(wc._snap_bbox(s, w, n, e),
+                         (round(0.44, 6), round(0.58, 6), round(0.46, 6), round(0.60, 6)))
+
+
 class TestPoiCache(unittest.TestCase):
     def test_second_call_hits_cache_without_querying(self):
         import tempfile
@@ -244,8 +261,8 @@ class TestPoiCache(unittest.TestCase):
         wc.fetch_pois = fake
         try:
             with tempfile.TemporaryDirectory() as d:
-                a = wc.fetch_pois_cached(-22.97, -43.18, -22.96, -43.17, cache_dir=d)
-                b = wc.fetch_pois_cached(-22.97, -43.18, -22.96, -43.17, cache_dir=d)
+                a = wc.fetch_pois_cached(40.4375, -111.9255, 40.4475, -111.9155, cache_dir=d)
+                b = wc.fetch_pois_cached(40.4375, -111.9255, 40.4475, -111.9155, cache_dir=d)
         finally:
             wc.fetch_pois = real
         self.assertEqual(calls["n"], 1)                        # only the first call queried OSM
@@ -385,7 +402,7 @@ class TestOverture(unittest.TestCase):
     def test_maps_rows_caches_and_drops_coordless(self):
         import tempfile
         dlat, dlon = wc.meters_to_deg(50, LAT)
-        rows = [("H&M", "clothing_store", -22.97001, -43.18001,
+        rows = [("H&M", "clothing_store", 40.43749, -111.92551,
                  "Rua X, 116 - Botafogo", "22290-070", "Rio de Janeiro"),
                 ("NoGeo", "bar", None, None, "", "", "")]     # no coords -> dropped
         with tempfile.TemporaryDirectory() as d:

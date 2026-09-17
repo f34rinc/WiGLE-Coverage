@@ -532,9 +532,14 @@ def fetch_pois(south, west, north, east, timeout=OVERPASS_TIMEOUT, url=None):
 
 def _snap_bbox(south, west, north, east, grid=POI_CACHE_GRID):
     """Expand a bbox outward to a fixed degree grid so nearby runs share one cache tile
-    (and the query covers at least the requested area)."""
-    return (math.floor(south / grid) * grid, math.floor(west / grid) * grid,
-            math.ceil(north / grid) * grid, math.ceil(east / grid) * grid)
+    (and the query covers at least the requested area). A tiny epsilon absorbs float error so
+    a value already ON the grid snaps to itself - without it, math.floor(0.59 / 0.01) lands at
+    58 (0.59/0.01 == 58.9999...) and silently widens the tile by a cell / breaks the cache key."""
+    eps = grid * 1e-6
+    return (round(math.floor((south + eps) / grid) * grid, 6),
+            round(math.floor((west + eps) / grid) * grid, 6),
+            round(math.ceil((north - eps) / grid) * grid, 6),
+            round(math.ceil((east - eps) / grid) * grid, 6))
 
 
 def _tile_of(lat, lon, grid=POI_CACHE_GRID):
