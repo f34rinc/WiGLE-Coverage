@@ -288,27 +288,27 @@ same ground (tweaking `--cell-size`, `--min-obs`, …) doesn't re-query OSM at a
 one tile yields a **partial** list rather than wiping it (failed tiles aren't cached — re-run to
 fill them in). Pass **`--refresh-pois`** to force a fresh pull.
 
-Queries go to the **`overpass-api.de`** reference instance by default — a touch slower and it
-rate-limits (so we pace it), but reliably up when the community mirrors are struggling — and
-**fall back to `kumi.systems`** (fast and un-throttled when it's healthy, but it has flaky
-spells). Both are equally up to date. A few things keep a bad Overpass day from becoming a
+Queries go to **`overpass.private.coffee`** first — a well-resourced instance (4 servers, 20
+cores / 256 GB each) that states **"no rate limit in place,"** run for the community. (It's the
+same server formerly known as `kumi.systems`, listed here under its current name.) The fallback
+is **`overpass-api.de`**, the FOSSGIS reference instance — it works, but the OSM wiki flags it as
+overloaded and asks you to *use alternatives if possible*, so we keep it only as a last resort and
+pace it slowly. Both are equally up to date. A few things keep a bad Overpass day from becoming a
 15-minute crawl:
 
 - a **short per-tile timeout**, so a slow/dead tile bails in seconds instead of ~40s;
-- **polite backoff-and-retry** — if a mirror answers *busy* (`429 Too Many Requests` or a `50x`),
-  it's up and just asking us to slow down, so we wait (honoring its `Retry-After` when it sends
-  one, else an exponential backoff) and retry the **same** mirror before giving up — so a merely
-  *throttled* Overpass day completes (slowly) instead of collapsing;
+- **polite backoff-and-retry** — if a mirror answers *busy*, we wait and retry the **same** mirror
+  before giving up: a **30-second pause** on an explicit rate limit (`429`/`406` — the courtesy the
+  [OSM wiki](https://wiki.openstreetmap.org/wiki/Overpass_API) asks for, or the server's
+  `Retry-After` if longer), and a shorter exponential backoff on a `50x` server error — so a merely
+  *throttled* Overpass day completes instead of collapsing;
 - a **circuit breaker** — if a mirror still fails **two tiles in a row** (a timeout or a dead
   connection, i.e. genuinely down — not a *busy* reply), it's dropped for the rest of the run; the
   other mirror carries on;
-- **per-mirror pacing** — the reference instance is paced more slowly so we don't trip its rate
-  limit (`429`) in the first place.
+- **per-mirror pacing** — the overloaded reference instance is paced more slowly than the primary.
 
-*(Two former mirrors were dropped in Sept 2026: `overpass.private.coffee` turned out to share
-`kumi.systems`' server and IP — a redundant duplicate that failed in lockstep — and the French
-instance `overpass.openstreetmap.fr` began returning `403 Forbidden` to the tool's requests. If
-Overpass is having a rough day everywhere, `--poi-source overture` skips it entirely.)*
+*(`overpass.openstreetmap.fr` was dropped in Sept 2026 for returning `403 Forbidden` to the tool's
+requests. If Overpass is having a rough day everywhere, `--poi-source overture` skips it entirely.)*
 
 POIs are © OpenStreetMap contributors (ODbL); treat the result as a "known targets" list, not an
 exhaustive one.
@@ -330,13 +330,15 @@ useful to you, please consider chipping in to the projects that make it possible
   places build heavily on OSM, so your edits flow right back), contribute to their open schema and
   tools on [GitHub](https://github.com/OvertureMaps), or send open data / feedback to
   `info@overturemaps.org`.
-- **Overpass API** — the query service that names the businesses in your holes. The software is
-  free and open (AGPL, by Roland Olbricht). Its reference instance `overpass-api.de` — the mirror
-  this tool queries **by default** — is operated by the non-profit **FOSSGIS e.V.**; donate at
-  <https://www.fossgis.de/verein/spenden/> (German page; PayPal or bank transfer).
-- **kumi.systems** — the fast Overpass mirror this tool uses as a **fallback**, run *free for the
-  community* by [Kumi Systems](https://kumi.systems/). They don't solicit public donations — the
-  way to support them is a thank-you and, if you ever need paid hosting, keeping them in mind.
+- **Overpass API** — the query service that names the businesses in your holes (the OSM fallback
+  source). The software is free and open (AGPL, by Roland Olbricht). Its reference instance
+  `overpass-api.de` — which this tool uses only as a **last-resort fallback** — is operated by the
+  non-profit **FOSSGIS e.V.**; donate at <https://www.fossgis.de/verein/spenden/> (German page;
+  PayPal or bank transfer).
+- **private.coffee** — the well-resourced, no-rate-limit Overpass mirror this tool queries
+  **first** (formerly `kumi.systems`), run *free for the community* by
+  [Private.coffee](https://private.coffee/). They don't solicit public donations — the courtesy
+  they ask is a heads-up before any large-scale use, and a thank-you.
 - **Esri** — the default **basemap tiles** (the satellite / street imagery under your coverage)
   come from Esri's keyless ArcGIS Online basemaps. Esri is a **commercial company**, so there's
   **no donation** — the way to respect it is to keep the **"© Esri" attribution** the map already

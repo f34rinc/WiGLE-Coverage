@@ -577,7 +577,7 @@ class TestPoliteRetry(unittest.TestCase):
         wc.fetch_pois = fake
         out = wc.fetch_pois_polite(0, 0, 1, 1, _sleep=self._record)
         self.assertEqual([p.name for p in out], ["ok"])
-        self.assertEqual(len(self.waits), 1)              # backed off exactly once, then succeeded
+        self.assertEqual(self.waits, [wc.OVERPASS_RATELIMIT_PAUSE_S])   # 429 -> the wiki's 30s pause
 
     def test_gives_up_after_max_retries(self):
         def fake(*a, **k):
@@ -603,15 +603,35 @@ class TestPoliteRetry(unittest.TestCase):
             wc.fetch_pois_polite(0, 0, 1, 1, _sleep=self._record)
         self.assertEqual(self.waits, [])
 
-    def test_honors_retry_after_header(self):
-        seq = [self._http_error(429, retry_after="7")]
+    def test_honors_a_long_retry_after(self):
+        seq = [self._http_error(429, retry_after="45")]   # server asks for MORE than the 30s floor
         def fake(*a, **k):
             if seq:
                 raise seq.pop(0)
             return [poi("ok")]
         wc.fetch_pois = fake
         wc.fetch_pois_polite(0, 0, 1, 1, _sleep=self._record)
-        self.assertEqual(self.waits, [7.0])               # waited exactly what the server asked for
+        self.assertEqual(self.waits, [45.0])              # honored (> the 30s floor, under the cap)
+
+    def test_short_retry_after_is_raised_to_the_floor(self):
+        seq = [self._http_error(429, retry_after="5")]    # server says 5s; the wiki floor is 30
+        def fake(*a, **k):
+            if seq:
+                raise seq.pop(0)
+            return [poi("ok")]
+        wc.fetch_pois = fake
+        wc.fetch_pois_polite(0, 0, 1, 1, _sleep=self._record)
+        self.assertEqual(self.waits, [wc.OVERPASS_RATELIMIT_PAUSE_S])   # raised to the 30s floor
+
+    def test_406_is_treated_as_a_rate_limit(self):
+        seq = [self._http_error(406)]                     # 406 -> the same 30s courtesy pause
+        def fake(*a, **k):
+            if seq:
+                raise seq.pop(0)
+            return [poi("ok")]
+        wc.fetch_pois = fake
+        wc.fetch_pois_polite(0, 0, 1, 1, _sleep=self._record)
+        self.assertEqual(self.waits, [wc.OVERPASS_RATELIMIT_PAUSE_S])
 
     def test_retry_after_is_capped(self):
         seq = [self._http_error(429, retry_after="99999")]   # absurd -> clamped to the cap

@@ -58,10 +58,11 @@ business coverage worldwide; needs `pip install duckdb`, one query over your are
 auto-falls back to OSM, so it still works out of the box. With OSM, the lookup is gentle:
 it queries ONE small grid tile at a time
 (only tiles that contain a hole), each cached locally (./.poi_cache, ~30 days) and politely
-paced - never one big citywide scan. Mirrors: overpass-api.de first (the reliable reference
-instance), kumi.systems as fallback, with a short per-tile timeout, polite backoff-and-retry when
-a mirror is just busy (429/50x), and a circuit breaker that drops a mirror after 2 hard failures
-in a row (so a bad Overpass day fails over fast instead of crawling). A failed tile is skipped
+paced - never one big citywide scan. Mirrors (per the OSM wiki): overpass.private.coffee first
+(well-resourced, no rate limit), overpass-api.de as the last-resort backup (the wiki flags it
+overloaded), with a short per-tile timeout, polite backoff-and-retry when a mirror is just busy
+(a 30s pause on a 429/406 rate limit, shorter for a 50x), and a circuit breaker that drops a
+mirror after 2 hard failures in a row (so a bad Overpass day fails over fast). A failed tile is skipped
 (partial list, never a wiped one) and never cached; --refresh-pois forces a fresh pull. OSM
 address/POI coverage varies worldwide.
 
@@ -95,15 +96,17 @@ TRACK_GAP_MIN  = 5      # minutes; a larger gap between fixes starts a new track
 TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one (jitter)
 RUN_GAP_MIN    = 30     # minutes of quiet that separates one run/session from the next
 EARTH_M_PER_DEG = 111320.0
-# Overpass (OpenStreetMap) - names businesses/POIs inside the "hole" cells (on by default).
-# overpass-api.de first: it's the reference instance - a touch slower and it rate-limits (we
-# pace it), but reliably up when the community mirrors are struggling. kumi.systems is the
-# fallback: fast and no rate limit when it's healthy, but it has flaky spells. (Dropped two
-# ex-mirrors 2026-09-16: overpass.private.coffee shared kumi's server/IP so it was a redundant
-# duplicate that died in lockstep, and overpass.openstreetmap.fr started 403-ing our requests.)
-# Both remaining mirrors are equally up to date; a tile query rotates through them on retry.
-OVERPASS_URLS = ("https://overpass-api.de/api/interpreter",
-                 "https://overpass.kumi.systems/api/interpreter")
+# Overpass (OpenStreetMap) - names businesses/POIs inside the "hole" cells; the FALLBACK source
+# (Overture is the default). Mirror order follows the OSM wiki's guidance:
+#   1. overpass.private.coffee - well-resourced (4x 20-core/256GB) with "no rate limit in place";
+#      this is the RENAMED overpass.kumi.systems (same server - which is why the two shared an IP
+#      and died together), so we list it once under its current name.
+#   2. overpass-api.de - the FOSSGIS reference instance. It works, but the wiki flags it as
+#      overloaded ("use alternatives if possible") with a tiny regular-use budget, so it's the
+#      last-resort backup: paced slowly, not the default. (overpass.openstreetmap.fr was dropped
+#      2026-09-16 for 403-ing our requests.) Both are equally up to date; a tile rotates on retry.
+OVERPASS_URLS = ("https://overpass.private.coffee/api/interpreter",
+                 "https://overpass-api.de/api/interpreter")
 OVERPASS_URL = OVERPASS_URLS[0]        # default single endpoint (fetch_pois) - primary mirror
 # OSM top-level keys we treat as "a named place worth targeting". We always require a name, so
 # unnamed clutter (benches, bins) is excluded automatically. Broad on purpose - for wardriving
@@ -132,10 +135,12 @@ OVERPASS_PAUSE_OVERRIDE = { # mirrors that rate-limit get a longer pause so we d
 # saying "slow down" / "busy") we wait and try the SAME mirror again instead of giving up. A
 # timeout or connection error is NOT retried here - that means the mirror is unresponsive, so we
 # fail over to the next mirror at once and let the circuit breaker drop a dead one fast.
-OVERPASS_RETRY_CODES = frozenset({429, 500, 502, 503, 504})  # "busy, come back" - worth retrying
+OVERPASS_RETRY_CODES = frozenset({406, 429, 500, 502, 503, 504})  # "busy, come back" - worth retrying
+OVERPASS_RATELIMIT_CODES = frozenset({406, 429})  # explicit rate-limit answers (named by the OSM wiki)
+OVERPASS_RATELIMIT_PAUSE_S = 30.0  # the OSM wiki asks for a FULL 30s pause after a 429/406
 OVERPASS_RETRIES = 2          # extra attempts on a throttle/overload response (so up to 3 total)
-OVERPASS_RETRY_BASE_S = 3.0   # first backoff wait; doubles each retry (+ jitter), capped below
-OVERPASS_RETRY_CAP_S = 30.0   # never back off longer than this per wait
+OVERPASS_RETRY_BASE_S = 3.0   # first backoff for a 50x server error; doubles each retry (+ jitter)
+OVERPASS_RETRY_CAP_S = 30.0   # never back off longer than this per wait (50x path)
 OVERPASS_RETRY_AFTER_CAP_S = 60.0  # honor a server-sent Retry-After header up to this many seconds
 # Optional alternative POI source: Overture Maps "places" (open, CDLA-Permissive 2.0). Vastly
 # better business coverage than OSM in many regions, worldwide. Needs the `duckdb` package
@@ -591,13 +596,14 @@ def _retry_after_secs(err):
 
 def fetch_pois_polite(south, west, north, east, timeout=OVERPASS_TIMEOUT, url=None,
                       retries=OVERPASS_RETRIES, on_wait=None, _sleep=time.sleep):
-    """fetch_pois with polite backoff-and-retry on a throttle/overload RESPONSE (HTTP 429/50x):
-    the mirror is up but busy, so we wait - honoring its Retry-After when it sends one, else an
-    exponential backoff (3s, 6s, ...) with jitter, capped - and try the SAME mirror again, up to
-    `retries` times. A timeout / connection error is NOT retried here: an unresponsive mirror is
-    re-raised at once so the caller fails over to the next mirror (and the circuit breaker drops a
-    dead one fast). Any other error (bad query, 403, ...) also re-raises immediately. `on_wait
-    (attempt, secs, code)` is an optional logging hook; `_sleep` is injectable for tests."""
+    """fetch_pois with polite backoff-and-retry on a throttle/overload RESPONSE (HTTP 406/429/50x):
+    the mirror is up but busy, so we wait and try the SAME mirror again, up to `retries` times.
+    A 406/429 (explicit rate limit) waits at least OVERPASS_RATELIMIT_PAUSE_S (30s) - the pause the
+    OSM wiki asks for - or the server's Retry-After if that's longer; a 50x server error uses a
+    shorter exponential backoff (3s, 6s, ...) with jitter. A timeout / connection error is NOT
+    retried here: an unresponsive mirror is re-raised at once so the caller fails over to the next
+    mirror (and the circuit breaker drops a dead one fast). Any other error (bad query, 403, ...)
+    also re-raises immediately. `on_wait(attempt, secs, code)` logs; `_sleep` is injectable."""
     import urllib.error
     attempt = 0
     while True:
@@ -606,8 +612,10 @@ def fetch_pois_polite(south, west, north, east, timeout=OVERPASS_TIMEOUT, url=No
         except urllib.error.HTTPError as err:
             if err.code not in OVERPASS_RETRY_CODES or attempt >= retries:
                 raise                          # not a "busy" code, or out of retries -> give up
-            wait = _retry_after_secs(err)
-            if wait is None:                   # no usable Retry-After -> exponential backoff + jitter
+            wait = _retry_after_secs(err)      # the server's Retry-After header, or None
+            if err.code in OVERPASS_RATELIMIT_CODES:   # 429/406 -> the wiki's 30s courtesy pause
+                wait = max(wait or 0.0, OVERPASS_RATELIMIT_PAUSE_S)
+            elif wait is None:                 # a 50x server error -> short exponential backoff
                 wait = min(OVERPASS_RETRY_BASE_S * (2 ** attempt), OVERPASS_RETRY_CAP_S)
                 wait += random.uniform(0, 0.5 * OVERPASS_RETRY_BASE_S)
             if on_wait:
