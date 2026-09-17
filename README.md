@@ -7,6 +7,13 @@ for planning the next wardrive so each outing lands on ground that's new to you.
 
 Output is a **self-contained local Leaflet map** (`.html`) you open in your browser.
 
+<p align="center">
+  <img src="docs/sample-map.svg" width="900"
+       alt="Sample wigle-coverage map: teal coverage cells over a street basemap, red 'hole' cells and yellow frontier 'edge' cells, a purple GPS track, graduated red hotspot circles, a Targets panel listing holes with their business counts, a layer control, and a popup naming the businesses inside a hole.">
+</p>
+
+<p align="center"><sub><i>Illustrative sample — not real coverage data.</i></sub></p>
+
 ## Quick start (no arguments)
 
 Drop your WiGLE **`.sqlite` backup** (or KML/CSV exports) into the **`data/`** folder beside
