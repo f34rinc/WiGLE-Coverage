@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the interactive menu into a self-contained SVG 'terminal screenshot' for the README.
 
-Runs the tool's own `_menu_status` + `_menu_help` with colour ON, captures the real ANSI output,
+Runs the tool's own `_menu_status` + `_menu_help` with color ON, captures the real ANSI output,
 and turns it into a static SVG that renders inline on GitHub (no image host, no fonts/scripts to
 fetch). Regenerate whenever the menu text or palette changes:
 
@@ -25,7 +25,7 @@ OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 
 # ---- dark-terminal palette (maps the tool's ANSI codes to hex) --------------
 FG_DEFAULT = "#c9d1d9"
-FG_BOLD    = "#e6edf3"          # bold, uncoloured text reads a touch brighter
+FG_BOLD    = "#e6edf3"          # bold, uncolored text reads a touch brighter
 DIM        = "#768390"
 COLORS = {"31": "#f47067", "32": "#57ab5a", "33": "#e3b341", "35": "#bc8cff", "36": "#39c5cf"}
 
@@ -35,8 +35,8 @@ FONT = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mo
 
 
 def capture_menu():
-    """The real menu output, with ANSI colour on and a representative 'found' line."""
-    w.C = w._C(True)                                   # force colour codes
+    """The real menu output, with ANSI color on and a representative 'found' line."""
+    w.C = w._C(True)                                   # force color codes
     # A real (empty) backup file so the panel's getmtime/basename work; name is the example shown.
     bk = os.path.join(tempfile.mkdtemp(), "WiGLE Database Backup.sqlite")
     open(bk, "w").close()
@@ -106,10 +106,10 @@ def to_svg(lines):
         y = TITLEH + PADTOP + (row + 1) * LINEH - 5
         spans = []
         for txt, s in runs:
-            if s["fg"] == FG_DEFAULT:                  # uncoloured: dim > bold > plain
+            if s["fg"] == FG_DEFAULT:                  # uncolored: dim > bold > plain
                 fill, opacity = (DIM, "") if s["dim"] else \
                                 ((FG_BOLD, "") if s["bold"] else (FG_DEFAULT, ""))
-            else:                                      # coloured: keep hue, fade if dim
+            else:                                      # colored: keep hue, fade if dim
                 fill, opacity = s["fg"], (' fill-opacity="0.75"' if s["dim"] else "")
             attrs = f'fill="{fill}"' + (' font-weight="700"' if s["bold"] else "") + opacity
             spans.append(f'<tspan {attrs}>{esc(txt)}</tspan>')

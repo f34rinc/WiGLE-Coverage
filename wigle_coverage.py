@@ -32,8 +32,9 @@ CLI:
                              [--data DIR] [-i] [--out map.html] [--no-open]
 
 YOUR ACTUAL PATH: pass --track pointing at a WiGLE SQLite backup and the map adds a
-toggle-able blue polyline of where you actually walked (raw GPS fixes from its
-`location` table, split into segments on time gaps). The cells come from the KML/CSV;
+toggle-able polyline of where you actually walked (black by default, recolorable via the
+in-map "Track color" picker; raw GPS fixes from its `location` table, split into segments
+on time gaps). The cells come from the KML/CSV;
 the track from the SQLite. The backup also works as a positional/dropped input - on
 its own it drives BOTH coverage and path (the entire-DB view).
 
@@ -196,7 +197,7 @@ def read_map_key():
     return None
 
 
-# ---- console colour (cross-platform; degrades to plain text) -----------------
+# ---- console color (cross-platform; degrades to plain text) -----------------
 class _C:
     def __init__(self, on):
         self.on = bool(on)         # a real ANSI terminal -> safe to clear-screen
@@ -208,7 +209,7 @@ class _C:
 
 
 def setup_color():
-    """Enable ANSI colour when writing to a real terminal (honours NO_COLOR); on
+    """Enable ANSI color when writing to a real terminal (honors NO_COLOR); on
     Windows this flips the console into virtual-terminal mode."""
     on = not os.environ.get("NO_COLOR") and sys.stdout.isatty()
     if on and os.name == "nt":
@@ -1200,11 +1201,11 @@ if (D.track && D.track.length){
     L.polyline(seg, {color:'#111827', weight:2, opacity:.85}));
   const trk = L.layerGroup(trackLines).addTo(map);
   layerCtl.addOverlay(trk, 'Your track');
-  // live colour picker for the track line
+  // live color picker for the track line
   const picker = L.control({position:'bottomleft'});
   picker.onAdd = function(){
     const d = L.DomUtil.create('div', 'legend');
-    d.innerHTML = '<b>Track colour</b>';
+    d.innerHTML = '<b>Track color</b>';
     const sel = L.DomUtil.create('select', '', d);
     [['#111827','Black'],['#2563eb','Blue'],['#0891b2','Cyan'],['#16a34a','Green'],
      ['#7c3aed','Purple'],['#db2777','Magenta'],['#dc2626','Red'],['#f59e0b','Orange']]
@@ -1222,7 +1223,7 @@ if (D.track && D.track.length){
 }
 
 // hotspots: WiGLE-style circles at the densest cells, sized by network count, number labeled,
-// and COLOURED by rank within your hotspots (ColorBrewer YlOrRd, low->high) so the top spots pop
+// and COLORED by rank within your hotspots (ColorBrewer YlOrRd, low->high) so the top spots pop
 if (D.hotspots && D.hotspots.length){
   const hs = L.layerGroup();
   const HSC = ['#fed976','#feb24c','#fd8d3c','#f03b20','#bd0026'];   // YlOrRd 5-class

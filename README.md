@@ -42,7 +42,7 @@ scripting (full list under [Command line](#use-it)).
 tool, because it carries everything in one place:
 
 - **coverage** — every network's location (where you were),
-- **your actual track path** — the timestamped GPS breadcrumb (drawn as the blue line), and
+- **your actual track path** — the timestamped GPS breadcrumb (a black line by default, recolorable in the map), and
 - **timestamps** — which unlock the run views (`--list-runs`, `--run N`, `--date`).
 
 A KML/CSV export has *none* of the track or timing — just network locations — so a backup
@@ -154,8 +154,9 @@ shows your **top ~10% densest cells** (adaptive per dataset); `--hotspot N` set
 threshold (only cells with ≥ N networks), and `--hotspot 0` turns it off.
 
 **Your actual path.** Pass `--track "C:\...\WiGLE Database Backup.sqlite"` and the map
-gains a toggle-able **blue line of where you really walked** — raw GPS fixes from the
-backup's `location` table, split into segments on time gaps (so separate walks don't
+gains a toggle-able **line of where you really walked** (**black by default**, recolorable
+live via the in-map **"Track color"** picker — Blue, Cyan, Green, Purple, …) — raw GPS fixes
+from the backup's `location` table, split into segments on time gaps (so separate walks don't
 join with a straight line). Cells come from the KML/CSV; the track from the SQLite.
 Lay it over the cells to see exactly which streets your coverage came from. A
 bottom-left dropdown recolors the track line.
@@ -174,7 +175,7 @@ python wigle_coverage.py --track "...\WiGLE Database Backup.sqlite" --date 2026-
 With just `--track` and no run flag you get the **entire-DB view** — all your history
 at once (coverage *and* path straight from the backup, no KML needed).
 
-Each cell's popup gives its centre coordinate plus an **Open in OpenStreetMap** link,
+Each cell's popup gives its center coordinate plus an **Open in OpenStreetMap** link,
 so one click drops you at that exact spot with full business/place names (the base
 tiles don't carry those). The top-right switcher offers Streets, Light gray,
 Satellite, and **Satellite + labels** — the last is handy for orienting among
