@@ -9,6 +9,8 @@ binning, coverage counting, and the hole/edge recommendation classification.
 import os
 import sys
 import math
+import shutil
+import tempfile
 import unittest
 import urllib.error
 
@@ -381,6 +383,9 @@ class _FakeCon:
 
     def execute(self, q):
         self._q = q
+        if "COPY" in q and "TO '" in q:          # a snapshot export -> create the file os.replace expects
+            path = q.split("TO '", 1)[1].split("'", 1)[0]
+            open(path, "w").close()
         return self
 
     def fetchall(self):
@@ -399,8 +404,14 @@ class _FakeDuck:
 
 
 class TestOverture(unittest.TestCase):
+    def setUp(self):
+        self._snap = tempfile.mkdtemp()          # keep the local snapshot out of the real data/ folder
+        self._orig = wc.OVERTURE_LOCAL_DIR
+        wc.OVERTURE_LOCAL_DIR = self._snap
+        self.addCleanup(shutil.rmtree, self._snap, ignore_errors=True)
+        self.addCleanup(setattr, wc, "OVERTURE_LOCAL_DIR", self._orig)
+
     def test_maps_rows_caches_and_drops_coordless(self):
-        import tempfile
         dlat, dlon = wc.meters_to_deg(50, LAT)
         rows = [("H&M", "clothing_store", 40.43749, -111.92551,
                  "116 Oak St", "84043", "Lehi"),
@@ -409,15 +420,43 @@ class TestOverture(unittest.TestCase):
             pois, stats = wc.fetch_pois_overture([(0, 0)], dlat, dlon, cache_dir=d,
                                                  duckdb=_FakeDuck(rows))
             self.assertEqual(stats["queried"], 1)
-            self.assertEqual([p.name for p in pois], ["H&M"])        # coord-less row dropped
+            self.assertEqual(stats["exported"], 1)                  # first run builds the local snapshot
+            self.assertEqual([p.name for p in pois], ["H&M"])       # coord-less row dropped
             p = pois[0]
             self.assertEqual(p.street, "116 Oak St")                # freeform -> street/address
             self.assertEqual(p.postcode, "84043")
             self.assertEqual(p.suburb, "Lehi")
-            # a cache hit must NOT need duckdb
+            # a result-cache hit must NOT need duckdb
             pois2, stats2 = wc.fetch_pois_overture([(0, 0)], dlat, dlon, cache_dir=d, duckdb=None)
         self.assertEqual(stats2["hits"], 1)
         self.assertEqual([p.name for p in pois2], ["H&M"])
+
+    def test_reuses_snapshot_for_a_new_area_inside_it(self):
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        rows = [("Shop", "shop", 40.4, -111.9, "", "", "")]
+        with tempfile.TemporaryDirectory() as d:
+            wc.fetch_pois_overture([(0, 0)], dlat, dlon, cache_dir=d, duckdb=_FakeDuck(rows))  # builds
+            pois, stats = wc.fetch_pois_overture([(30, 30)], dlat, dlon, cache_dir=d, duckdb=_FakeDuck(rows))
+        self.assertEqual(stats["exported"], 0)                      # inside the stored box -> no re-download
+        self.assertEqual(stats["queried"], 1)
+        self.assertEqual([p.name for p in pois], ["Shop"])
+
+    def test_reexports_when_coverage_expands_outside(self):
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        rows = [("Shop", "shop", 40.4, -111.9, "", "", "")]
+        with tempfile.TemporaryDirectory() as d:
+            wc.fetch_pois_overture([(0, 0)], dlat, dlon, cache_dir=d, duckdb=_FakeDuck(rows))       # builds
+            _, stats = wc.fetch_pois_overture([(300, 300)], dlat, dlon, cache_dir=d, duckdb=_FakeDuck(rows))
+        self.assertEqual(stats["exported"], 1)                      # holes now outside -> re-download
+
+    def test_refresh_snapshot_rebuilds_in_place(self):
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        rows = [("Shop", "shop", 40.4, -111.9, "", "", "")]
+        with tempfile.TemporaryDirectory() as d:
+            wc.fetch_pois_overture([(0, 0)], dlat, dlon, cache_dir=d, duckdb=_FakeDuck(rows))       # builds
+            _, stats = wc.fetch_pois_overture([(0, 0)], dlat, dlon, cache_dir=d,
+                                              refresh_snapshot=True, duckdb=_FakeDuck(rows))
+        self.assertEqual(stats["exported"], 1)                      # --refresh-overture re-downloads
 
     def test_missing_duckdb_on_a_fresh_query_raises(self):
         import tempfile

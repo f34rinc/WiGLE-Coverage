@@ -53,9 +53,12 @@ that panel); and in a plain <map>_targets.txt. The printable sheet groups holes 
 one - falling back to the coordinate when it doesn't. The list is trimmed for usefulness -
 --max-pois-per-hole (default 4) and --max-pois (default 100, richest holes first); extras
 show as "+N more". SOURCE: --poi-source overture (default - Overture Maps places, far better
-business coverage worldwide; needs `pip install duckdb`, one query over your area, cached;
---overture-confidence trims low-confidence rows) or osm (no setup). Without duckdb the default
-auto-falls back to OSM, so it still works out of the box. With OSM, the lookup is gentle:
+business coverage worldwide; needs `pip install duckdb`. The first run downloads the places for
+your coverage area ONCE into a local snapshot (data/overture/) so every lookup after that is
+OFFLINE; it re-downloads only when you wardrive outside the stored box, or on --refresh-overture
+to pull the latest release. --overture-confidence trims low-confidence rows) or osm (no setup).
+Without duckdb the default auto-falls back to OSM, so it still works out of the box. With OSM,
+the lookup is gentle:
 it queries ONE small grid tile at a time
 (only tiles that contain a hole), each cached locally (./.poi_cache, ~30 days) and politely
 paced - never one big citywide scan. Mirrors (per the OSM wiki): overpass.private.coffee first
@@ -149,6 +152,11 @@ POI_SOURCES = ("osm", "overture")
 OVERTURE_RELEASE = "2026-08-19.0"     # bump to a newer release date as they publish
 OVERTURE_S3 = ("s3://overturemaps-us-west-2/release/{rel}/theme=places/type=place/*")
 OVERTURE_MIN_CONFIDENCE = 0.5         # Overture scores each place 0-1; drop the low-confidence noise
+# Local Overture snapshot: on the first Overture run we download the places for your coverage area
+# ONCE (from S3) into a small local Parquet, then every lookup is offline. Re-downloads only if you
+# wardrive OUTSIDE the stored box (auto) or run --refresh-overture (to pull the latest release).
+OVERTURE_LOCAL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "overture")
+OVERTURE_BBOX_PAD = 0.05              # ~5km pad on the exported box so small coverage growth doesn't re-fetch
 POI_ATTRIB = {                        # required attribution per source (shown on the outputs)
     "osm": "OpenStreetMap contributors (ODbL)",
     "overture": "Overture Maps Foundation (CDLA-Permissive 2.0); includes OpenStreetMap (ODbL)",
@@ -744,21 +752,68 @@ def _overture_cache_path(bbox, cache_dir, release, conf):
     return os.path.join(cache_dir, "poi_" + hashlib.sha1(key.encode()).hexdigest()[:16] + ".json")
 
 
-def fetch_pois_overture(hole_cells, dlat, dlon, refresh=False, cache_dir=None,
+def _overture_snapshot_paths(release):
+    """The local snapshot Parquet + its sidecar-metadata JSON for a given Overture release."""
+    tag = re.sub(r"[^0-9A-Za-z.\-]", "_", release)
+    base = os.path.join(OVERTURE_LOCAL_DIR, f"places_{tag}")
+    return base + ".parquet", base + ".json"
+
+
+def _bbox_covers(outer, inner):
+    """True if bbox `outer` (s,w,n,e) fully contains `inner`."""
+    return (outer[0] <= inner[0] and outer[1] <= inner[1]
+            and outer[2] >= inner[2] and outer[3] >= inner[3])
+
+
+def _bbox_union(a, b):
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
+def _overture_export_local(duckdb, export_bbox, out_parquet, meta_path, release):
+    """One-time: download Overture 'places' for `export_bbox` from S3 into a local Parquet - just the
+    fields we use + confidence, named places only - and record the covered box in a sidecar JSON.
+    After this the tool queries the local file, never S3, until the box grows or you --refresh."""
+    s, w, n, e = export_bbox
+    src = f"read_parquet('{OVERTURE_S3.format(rel=release)}', hive_partitioning=1)"
+    os.makedirs(os.path.dirname(out_parquet), exist_ok=True)
+    tmp = (out_parquet + ".tmp").replace("\\", "/")
+    con = duckdb.connect()
+    try:
+        con.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs; SET s3_region='us-west-2';")
+        con.execute(
+            "COPY (SELECT names.primary AS name, categories.primary AS cat, "
+            "ST_Y(geometry) AS lat, ST_X(geometry) AS lon, "
+            "addresses[1].freeform AS freeform, addresses[1].postcode AS postcode, "
+            "addresses[1].locality AS locality, confidence "
+            f"FROM {src} "
+            f"WHERE bbox.xmin BETWEEN {w} AND {e} AND bbox.ymin BETWEEN {s} AND {n} "
+            "AND names.primary IS NOT NULL) "
+            f"TO '{tmp}' (FORMAT PARQUET)")
+    finally:
+        con.close()
+    os.replace(tmp, out_parquet)
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump({"bbox": list(export_bbox), "release": release, "built": time.time()}, fh)
+
+
+def fetch_pois_overture(hole_cells, dlat, dlon, refresh=False, refresh_snapshot=False, cache_dir=None,
                         min_confidence=OVERTURE_MIN_CONFIDENCE, release=OVERTURE_RELEASE,
-                        duckdb=None, on_progress=None):
-    """POIs from Overture Maps 'places' (open, CDLA-Permissive) via DuckDB. Unlike Overpass
-    this is one bbox query over cloud Parquet (DuckDB prunes by the bbox column), so there's no
-    per-tile tiling - just the holes' bounding box, cached by bbox. Returns (pois, stats) shaped
-    like fetch_pois_tiled. Raises RuntimeError('duckdb-missing') if duckdb isn't installed."""
+                        duckdb=None, on_progress=None, on_export=None):
+    """POIs from Overture Maps 'places' (open, CDLA-Permissive). The tool keeps a LOCAL snapshot of
+    your coverage area (data/overture/places_<release>.parquet), built once from S3 on the first run
+    so every lookup afterwards is offline. It re-downloads only when your holes reach OUTSIDE the
+    stored box (auto) or `refresh_snapshot` is set (--refresh-overture, to move to the latest
+    release). Returns (pois, stats) shaped like fetch_pois_tiled; `refresh` re-reads past the result
+    cache; raises RuntimeError('duckdb-missing') if duckdb isn't installed. `on_export(bbox, kind)`
+    (kind = 'first'/'expand'/'refresh') fires just before a download so the caller can announce it."""
     if cache_dir is None:
         cache_dir = POI_CACHE_DIR
     rs = [c[0] for c in hole_cells]
     cs = [c[1] for c in hole_cells]
     bbox = _snap_bbox(min(rs) * dlat, min(cs) * dlon, (max(rs) + 1) * dlat, (max(cs) + 1) * dlon)
-    stats = {"tiles": 1, "hits": 0, "queried": 0, "failed": 0, "dropped": []}
+    stats = {"tiles": 1, "hits": 0, "queried": 0, "failed": 0, "exported": 0, "dropped": []}
     path = _overture_cache_path(bbox, cache_dir, release, min_confidence)
-    if not refresh:                        # a cache hit is just JSON - no duckdb needed
+    if not (refresh or refresh_snapshot):   # a result-cache hit is just JSON - no duckdb needed
         try:
             if os.path.exists(path) and time.time() - os.path.getmtime(path) < POI_CACHE_TTL_DAYS * 86400:
                 with open(path, encoding="utf-8") as fh:
@@ -769,21 +824,41 @@ def fetch_pois_overture(hole_cells, dlat, dlon, refresh=False, cache_dir=None,
                 return pois, stats
         except Exception:
             pass
-    duckdb = duckdb or _load_duckdb()      # a fresh query needs duckdb
+    duckdb = duckdb or _load_duckdb()       # building or querying the snapshot needs duckdb
     if duckdb is None:
         raise RuntimeError("duckdb-missing")
+
+    # 1. ensure a local snapshot that covers this area - download from S3 only if we must
+    snap_parquet, meta_path = _overture_snapshot_paths(release)
+    stored = None
+    try:
+        if os.path.exists(meta_path) and os.path.exists(snap_parquet):
+            with open(meta_path, encoding="utf-8") as fh:
+                stored = tuple(json.load(fh)["bbox"])
+    except Exception:
+        stored = None
+    if refresh_snapshot or stored is None or not _bbox_covers(stored, bbox):
+        base = bbox if (stored is None or refresh_snapshot) else _bbox_union(stored, bbox)
+        pad = OVERTURE_BBOX_PAD
+        export_bbox = (base[0] - pad, base[1] - pad, base[2] + pad, base[3] + pad)
+        if refresh_snapshot and stored is not None:     # keep prior extent when updating the release
+            export_bbox = _bbox_union(export_bbox, stored)
+        if on_export:
+            on_export(export_bbox, "refresh" if (refresh_snapshot and stored) else
+                      ("expand" if stored else "first"))
+        _overture_export_local(duckdb, export_bbox, snap_parquet, meta_path, release)
+        stats["exported"] = 1
+
+    # 2. query the LOCAL snapshot for this bbox - offline, no extensions, no network
     south, west, north, east = bbox
-    src = f"read_parquet('{OVERTURE_S3.format(rel=release)}', hive_partitioning=1)"
+    local = snap_parquet.replace("\\", "/")
     con = duckdb.connect()
     try:
-        con.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs; "
-                    "SET s3_region='us-west-2';")
         rows = con.execute(
-            "SELECT names.primary, categories.primary, ST_Y(geometry), ST_X(geometry), "
-            "addresses[1].freeform, addresses[1].postcode, addresses[1].locality "
-            f"FROM {src} "
-            f"WHERE bbox.xmin BETWEEN {west} AND {east} AND bbox.ymin BETWEEN {south} AND {north} "
-            f"AND names.primary IS NOT NULL AND confidence >= {float(min_confidence)}").fetchall()
+            "SELECT name, cat, lat, lon, freeform, postcode, locality "
+            f"FROM read_parquet('{local}') "
+            f"WHERE lat BETWEEN {south} AND {north} AND lon BETWEEN {west} AND {east} "
+            f"AND confidence >= {float(min_confidence)}").fetchall()
     finally:
         con.close()
     pois = []
@@ -1398,6 +1473,11 @@ def parse_args():
                    help=f"cap total businesses across all holes, richest first (default {MAX_POIS_TOTAL}; 0 = no cap)")
     g.add_argument("--refresh-pois", action="store_true",
                    help="ignore the local POI cache and re-query the source for this area")
+    g.add_argument("--refresh-overture", action="store_true",
+                   help="Overture only: re-download the local snapshot at the current release "
+                        "(data/overture/) - use it to pull the latest data")
+    g.add_argument("--overture-release", default=OVERTURE_RELEASE, metavar="YYYY-MM-DD.N",
+                   help=f"Overture only: which Overture release to use (default {OVERTURE_RELEASE})")
 
     g = p.add_argument_group("grid + track tuning")
     g.add_argument("--cell-size", type=float, default=CELL_SIZE_M, metavar="M",
@@ -1586,16 +1666,28 @@ def run(args):
             t_poi = time.perf_counter()
 
             if source == "overture":
-                print(f"looking up businesses (Overture Maps, release {OVERTURE_RELEASE}) {C.dim}"
-                      f"(one query over your area; first run downloads a DuckDB extension){C.reset}...")
+                release = getattr(args, "overture_release", OVERTURE_RELEASE)
+                refresh_snap = getattr(args, "refresh_overture", False)
+                print(f"looking up businesses (Overture Maps, release {release}) {C.dim}"
+                      f"(local snapshot in data/overture; first run / new area downloads it once){C.reset}...")
+
+                def _export_note(_bbox, kind):
+                    what = {"first": "building the local Overture snapshot",
+                            "expand": "coverage grew - re-downloading a bigger Overture snapshot",
+                            "refresh": "refreshing the local Overture snapshot"}[kind]
+                    print(f"  {C.dim}{what} for your area (one-time S3 download)...{C.reset}")
+
                 try:
                     pois, stats = fetch_pois_overture(
-                        hole_cells, dlat, dlon, refresh=refresh,
+                        hole_cells, dlat, dlon, refresh=refresh, refresh_snapshot=refresh_snap,
+                        release=release, on_export=_export_note,
                         min_confidence=getattr(args, "overture_confidence", OVERTURE_MIN_CONFIDENCE))
                 except Exception as exc:
                     print(f"  {C.red}!! Overture query failed{C.reset} ({exc}); rendering without targets.")
                 poi_secs = time.perf_counter() - t_poi
-                how = "from cache" if stats.get("hits") else ("queried S3" if stats.get("queried") else "failed")
+                how = ("built local snapshot + queried" if stats.get("exported")
+                       else "from cache" if stats.get("hits")
+                       else "queried local" if stats.get("queried") else "failed")
                 print(f"  Overture lookup: {_fmt_secs(poi_secs)}  {C.dim}({how}, {len(pois):,} places){C.reset}")
             else:
                 ntiles = len(hole_tiles(hole_cells, dlat, dlon))
@@ -1762,9 +1854,9 @@ def _menu_namespace(st, list_runs=False):
         run=st["run"] if st["mode"] == "run" else None,
         date=st["date"] if st["mode"] == "date" else None,
         pois=st.get("pois", True), poi_source=st.get("poi_source", "overture"),
-        overture_confidence=OVERTURE_MIN_CONFIDENCE, hotspot=None,
+        overture_confidence=OVERTURE_MIN_CONFIDENCE, overture_release=OVERTURE_RELEASE, hotspot=None,
         max_pois_per_hole=MAX_POIS_PER_HOLE, max_pois=MAX_POIS_TOTAL,
-        refresh_pois=False, out=None, no_open=True, menu=False)
+        refresh_pois=False, refresh_overture=False, out=None, no_open=True, menu=False)
 
 
 def interactive_menu(args):

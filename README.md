@@ -119,9 +119,11 @@ The full flag list (grouped as `python wigle_coverage.py --help` prints them):
 | `--pois` / `--no-pois` | on | name the businesses in each hole |
 | `--poi-source SRC` | `overture` | `overture` (needs `pip install duckdb`; auto-falls back to `osm` without it), or `osm` (no setup) |
 | `--overture-confidence C` | 0.5 | Overture: min confidence, 0–1 |
+| `--overture-release D` | pinned | Overture: which release (`YYYY-MM-DD.N`) the local snapshot uses |
 | `--max-pois-per-hole N` | 4 | max shown per hole; rest → "+N more" (0 = off) |
 | `--max-pois N` | 100 | max total, richest holes first (0 = off) |
-| `--refresh-pois` | off | ignore the cache; re-query the source |
+| `--refresh-pois` | off | ignore the result cache; re-query the source |
+| `--refresh-overture` | off | re-download the local Overture snapshot (pull the latest release) |
 
 **Grid + track tuning**
 
@@ -267,8 +269,12 @@ pip install duckdb                                  # one ~10 MB package, no oth
 python wigle_coverage.py <exports>                  # Overture is the default
 ```
 
-That's the whole setup. It runs **one query** over your area (DuckDB reads Overture's cloud
-Parquet, pruned to your bounding box) and caches the result, so re-runs are instant.
+That's the whole setup. On the **first run** the tool downloads the Overture places for your
+**coverage area** just once (DuckDB reads Overture's cloud
+Parquet, pruned to your bounding box) into a small **local snapshot** at `data/overture/` — from
+then on **every lookup is offline** (no cloud, no rate limits, instant; a metro is tens of MB). It
+re-downloads only when you wardrive **outside** the stored box (it auto-expands), or when you run
+**`--refresh-overture`** to pull the latest release (`--overture-release` picks a specific one).
 `--overture-confidence C` drops low-confidence places (default `0.5`). In a real dense-city run this
 pulled **497 businesses into 96 holes in ~13 s**, versus 71 across 36 holes from OSM.
 
