@@ -1688,8 +1688,13 @@ def _menu_status(st):
     print(f"  {b}found{r} | {found}")
     print(f"  {b}grid {r} | cell {g}{st['cell_size']:.0f} m{r} | min-obs {st['min_obs']} | hole {st['hole_threshold']}")
     print(f"  {b}mode {r} | {g}{mode}{r}  |  pois {'on' if st.get('pois') else 'off'}")
-    print(f"  {b}{m}source{r} | {m}{b}{src.upper()}{r} | where business names come from "
-          f"({'zero-setup' if src == 'osm' else 'needs duckdb: pip install duckdb'})")
+    if src == "osm":
+        setup = f"{g}zero-setup{r}"
+    elif _load_duckdb() is not None:
+        setup = f"{g}duckdb ready{r}"
+    else:
+        setup = f"{C.yellow}needs duckdb: pip install duckdb{r}"
+    print(f"  {b}{m}source{r} | {m}{b}{src.upper()}{r} | where business names come from ({setup})")
 
 
 def _menu_help():
