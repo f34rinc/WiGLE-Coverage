@@ -1689,7 +1689,7 @@ def _menu_status(st):
     print(f"  {b}grid {r} | cell {g}{st['cell_size']:.0f} m{r} | min-obs {st['min_obs']} | hole {st['hole_threshold']}")
     print(f"  {b}mode {r} | {g}{mode}{r}  |  pois {'on' if st.get('pois') else 'off'}")
     print(f"  {b}{m}source{r} | {m}{b}{src.upper()}{r} | where business names come from "
-          f"({'zero-setup' if src == 'osm' else 'needs duckdb'})")
+          f"({'zero-setup' if src == 'osm' else 'needs duckdb: pip install duckdb'})")
 
 
 def _menu_help():
@@ -1703,8 +1703,8 @@ def _menu_help():
     print(f"  {y}data{r} <path>    read a different folder")
     print(f"  {y}pois{r}           toggle naming businesses in holes")
     print(_rule(label="POI source - where the business names come from"))
-    print(f"  {m}{C.b}source{r}         switch  {m}{C.b}overture{r} (default; better dataset; "
-          f"pip install duckdb)  <->  {m}{C.b}osm{r} (zero-setup)")
+    print(f"  {m}{C.b}source{r}         switch  {m}{C.b}overture{r} (default; better dataset)  "
+          f"<->  {m}{C.b}osm{r} (zero-setup)")
     print(_rule(label="go"))
     print(f"  {y}go{r} (or Enter)  build + open the map    {y}help{r}   commands    {y}q{r}   quit")
     print(_rule("="))
