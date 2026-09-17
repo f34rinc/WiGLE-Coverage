@@ -121,11 +121,11 @@ class TestPOIs(unittest.TestCase):
         dlat, dlon = wc.meters_to_deg(50, LAT)
         hole = wc.cell_of(40.4375, -111.9255, dlat, dlon)
         other = wc.cell_of(40.4175, -111.9455, dlat, dlon)   # not a hole
-        pois = [poi("Padaria", "bakery", 40.43749, -111.92551),   # inside the hole cell
-                poi("FarAway", "bar", 40.41749, -111.94551)]      # outside any hole
+        pois = [poi("Corner Bakery", "bakery", 40.43749, -111.92551),  # inside the hole cell
+                poi("FarAway", "bar", 40.41749, -111.94551)]           # outside any hole
         got = wc.assign_pois_to_holes(pois, [hole], dlat, dlon)
         self.assertIn(hole, got)
-        self.assertEqual([p.name for p in got[hole]], ["Padaria"])
+        self.assertEqual([p.name for p in got[hole]], ["Corner Bakery"])
         self.assertNotIn(other, got)                            # non-hole POI dropped
 
 
@@ -171,18 +171,18 @@ class TestTargetsHtml(unittest.TestCase):
         dlat, dlon = self._dlatlon()
         hole = wc.cell_of(40.4375, -111.9255, dlat, dlon)
         recs = [{"cell": list(hole), "label": "hole", "covered_neighbors": 8}]
-        poi_by_hole = {hole: [poi("Padaria & Café <Zé>", "bakery", 40.43749, -111.92551,
-                                  street="Rua X", hn="502", postcode="22070-011")]}
+        poi_by_hole = {hole: [poi("Bob & Sons <Café>", "bakery", 40.43749, -111.92551,
+                                  street="Oak St", hn="502", postcode="84043")]}
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "t_targets.html")
             wc.render_targets_html(p, recs, poi_by_hole, dlat, dlon)
             with open(p, encoding="utf-8") as fh:
                 html = fh.read()
         self.assertIn("<!doctype html>", html.lower())
-        self.assertIn("Padaria &amp; Caf", html)              # name is HTML-escaped, not raw
-        self.assertNotIn("<Zé>", html)                         # the < is escaped, never injected
-        self.assertIn("22070-011", html)                       # postcode section header
-        self.assertIn("502 Rua X", html)                       # the street address is shown
+        self.assertIn("Bob &amp; Sons", html)                  # name is HTML-escaped, not raw
+        self.assertNotIn("<Café>", html)                       # the < is escaped, never injected
+        self.assertIn("84043", html)                           # postcode section header
+        self.assertIn("502 Oak St", html)                      # the street address is shown
         self.assertIn('class="street"', html)                  # hole labeled by its street, not coord
 
     def test_doc_unlocated_falls_back_to_coordinate(self):
@@ -403,7 +403,7 @@ class TestOverture(unittest.TestCase):
         import tempfile
         dlat, dlon = wc.meters_to_deg(50, LAT)
         rows = [("H&M", "clothing_store", 40.43749, -111.92551,
-                 "Rua X, 116 - Botafogo", "22290-070", "Rio de Janeiro"),
+                 "116 Oak St", "84043", "Lehi"),
                 ("NoGeo", "bar", None, None, "", "", "")]     # no coords -> dropped
         with tempfile.TemporaryDirectory() as d:
             pois, stats = wc.fetch_pois_overture([(0, 0)], dlat, dlon, cache_dir=d,
@@ -411,9 +411,9 @@ class TestOverture(unittest.TestCase):
             self.assertEqual(stats["queried"], 1)
             self.assertEqual([p.name for p in pois], ["H&M"])        # coord-less row dropped
             p = pois[0]
-            self.assertEqual(p.street, "Rua X, 116 - Botafogo")     # freeform -> street/address
-            self.assertEqual(p.postcode, "22290-070")
-            self.assertEqual(p.suburb, "Rio de Janeiro")
+            self.assertEqual(p.street, "116 Oak St")                # freeform -> street/address
+            self.assertEqual(p.postcode, "84043")
+            self.assertEqual(p.suburb, "Lehi")
             # a cache hit must NOT need duckdb
             pois2, stats2 = wc.fetch_pois_overture([(0, 0)], dlat, dlon, cache_dir=d, duckdb=None)
         self.assertEqual(stats2["hits"], 1)

@@ -782,7 +782,7 @@ def fetch_pois_overture(hole_cells, dlat, dlon, refresh=False, cache_dir=None,
     for name, cat, lat, lon, freeform, postcode, locality in rows:
         if lat is None or lon is None:
             continue
-        # freeform is the whole street line ("Rua X, 116 - Bairro"); our poi_address() shows it
+        # freeform is the whole street line ("116 Oak St, Downtown"); our poi_address() shows it
         pois.append(POI(name, cat or "", float(lat), float(lon),
                         freeform or "", "", postcode or "", locality or ""))
     try:
