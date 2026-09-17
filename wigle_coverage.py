@@ -64,7 +64,7 @@ it queries ONE small grid tile at a time
 paced - never one big citywide scan. Mirrors (per the OSM wiki): overpass.private.coffee first
 (well-resourced, no rate limit), overpass-api.de as the last-resort backup (the wiki flags it
 overloaded), with a short per-tile timeout, polite backoff-and-retry when a mirror is just busy
-(a 30s pause on a 429/406 rate limit, shorter for a 50x), and a circuit breaker that drops a
+(a kind, random 35-60s pause on a 429/406 rate limit, shorter for a 50x), and a circuit breaker that drops a
 mirror after 2 hard failures in a row (so a bad Overpass day fails over fast). A failed tile is skipped
 (partial list, never a wiped one) and never cached; --refresh-pois forces a fresh pull. OSM
 address/POI coverage varies worldwide.
@@ -140,7 +140,8 @@ OVERPASS_PAUSE_OVERRIDE = { # mirrors that rate-limit get a longer pause so we d
 # fail over to the next mirror at once and let the circuit breaker drop a dead one fast.
 OVERPASS_RETRY_CODES = frozenset({406, 429, 500, 502, 503, 504})  # "busy, come back" - worth retrying
 OVERPASS_RATELIMIT_CODES = frozenset({406, 429})  # explicit rate-limit answers (named by the OSM wiki)
-OVERPASS_RATELIMIT_PAUSE_S = 30.0  # the OSM wiki asks for a FULL 30s pause after a 429/406
+OVERPASS_RATELIMIT_PAUSE_RANGE = (35.0, 60.0)  # random pause after a 429/406 - kinder than the wiki's
+                                               # 30s floor, and jittered so many clients don't retry in sync
 OVERPASS_RETRIES = 2          # extra attempts on a throttle/overload response (so up to 3 total)
 OVERPASS_RETRY_BASE_S = 3.0   # first backoff for a 50x server error; doubles each retry (+ jitter)
 OVERPASS_RETRY_CAP_S = 30.0   # never back off longer than this per wait (50x path)
@@ -606,8 +607,8 @@ def fetch_pois_polite(south, west, north, east, timeout=OVERPASS_TIMEOUT, url=No
                       retries=OVERPASS_RETRIES, on_wait=None, _sleep=time.sleep):
     """fetch_pois with polite backoff-and-retry on a throttle/overload RESPONSE (HTTP 406/429/50x):
     the mirror is up but busy, so we wait and try the SAME mirror again, up to `retries` times.
-    A 406/429 (explicit rate limit) waits at least OVERPASS_RATELIMIT_PAUSE_S (30s) - the pause the
-    OSM wiki asks for - or the server's Retry-After if that's longer; a 50x server error uses a
+    A 406/429 (explicit rate limit) waits a random 35-60s - kinder than the OSM wiki's 30s floor,
+    jittered to avoid synchronized retries - or the server's Retry-After if that's longer; a 50x uses a
     shorter exponential backoff (3s, 6s, ...) with jitter. A timeout / connection error is NOT
     retried here: an unresponsive mirror is re-raised at once so the caller fails over to the next
     mirror (and the circuit breaker drops a dead one fast). Any other error (bad query, 403, ...)
@@ -621,8 +622,8 @@ def fetch_pois_polite(south, west, north, east, timeout=OVERPASS_TIMEOUT, url=No
             if err.code not in OVERPASS_RETRY_CODES or attempt >= retries:
                 raise                          # not a "busy" code, or out of retries -> give up
             wait = _retry_after_secs(err)      # the server's Retry-After header, or None
-            if err.code in OVERPASS_RATELIMIT_CODES:   # 429/406 -> the wiki's 30s courtesy pause
-                wait = max(wait or 0.0, OVERPASS_RATELIMIT_PAUSE_S)
+            if err.code in OVERPASS_RATELIMIT_CODES:   # 429/406 -> a kind, jittered 35-60s pause
+                wait = max(wait or 0.0, random.uniform(*OVERPASS_RATELIMIT_PAUSE_RANGE))
             elif wait is None:                 # a 50x server error -> short exponential backoff
                 wait = min(OVERPASS_RETRY_BASE_S * (2 ** attempt), OVERPASS_RETRY_CAP_S)
                 wait += random.uniform(0, 0.5 * OVERPASS_RETRY_BASE_S)

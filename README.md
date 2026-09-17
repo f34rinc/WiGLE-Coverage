@@ -304,7 +304,7 @@ pace it slowly. Both are equally up to date. A few things keep a bad Overpass da
 
 - a **short per-tile timeout**, so a slow/dead tile bails in seconds instead of ~40s;
 - **polite backoff-and-retry** — if a mirror answers *busy*, we wait and retry the **same** mirror
-  before giving up: a **30-second pause** on an explicit rate limit (`429`/`406` — the courtesy the
+  before giving up: a kind, **randomized 35–60 s pause** on an explicit rate limit (`429`/`406` — over the courtesy the
   [OSM wiki](https://wiki.openstreetmap.org/wiki/Overpass_API) asks for, or the server's
   `Retry-After` if longer), and a shorter exponential backoff on a `50x` server error — so a merely
   *throttled* Overpass day completes instead of collapsing;
