@@ -1,4 +1,4 @@
-# wigle-coverage
+# WiGLE coverage
 
 Turn your WiGLE exports into a **coverage map** that shows where you've walked and
 — more usefully — **recommends where you haven't**: the blank cells on the frontier
@@ -9,10 +9,14 @@ Output is a **self-contained local Leaflet map** (`.html`) you open in your brow
 
 <p align="center">
   <img src="docs/sample-map.svg" width="900"
-       alt="Sample wigle-coverage map: teal coverage cells over a street basemap, red 'hole' cells and yellow frontier 'edge' cells, a purple GPS track, graduated red hotspot circles, a Targets panel listing holes with their business counts, a layer control, and a popup naming the businesses inside a hole.">
+       alt="Sample WiGLE coverage map: teal coverage cells over a street basemap, red 'hole' cells and yellow frontier 'edge' cells, a purple GPS track, graduated red hotspot circles, a Targets panel listing holes with their business counts, a layer control, and a popup naming the businesses inside a hole.">
 </p>
 
 <p align="center"><sub><i>Illustrative sample — not real coverage data.</i></sub></p>
+
+> *Independent hobby project — **not affiliated with, endorsed by, or connected to
+> [WiGLE](https://wigle.net)**. "WiGLE" is a trademark of its owner, used here only to
+> name the data this tool reads.*
 
 ## Quick start (no arguments)
 

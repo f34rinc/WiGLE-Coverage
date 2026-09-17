@@ -8,7 +8,7 @@
 <circle cx="58" cy="17" r="6" fill="#27c93f"/>
 <text x="340" y="21" text-anchor="middle" fill="#768390" font-size="12">python wigle_coverage.py</text>
 <text x="20" y="63" xml:space="preserve"></text>
-<text x="20" y="83" xml:space="preserve"><tspan fill="#c9d1d9"> </tspan><tspan fill="#39c5cf" font-weight="700">wigle-coverage</tspan></text>
+<text x="20" y="83" xml:space="preserve"><tspan fill="#c9d1d9"> </tspan><tspan fill="#39c5cf" font-weight="700">WiGLE coverage</tspan></text>
 <text x="20" y="103" xml:space="preserve"><tspan fill="#768390">========================================================</tspan></text>
 <text x="20" y="123" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#e6edf3" font-weight="700">data </tspan><tspan fill="#c9d1d9"> | ./data</tspan></text>
 <text x="20" y="143" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#e6edf3" font-weight="700">found</tspan><tspan fill="#c9d1d9"> | 3 KML/CSV | backup: WiGLE Database Backup.sqlite</tspan></text>
