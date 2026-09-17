@@ -357,9 +357,11 @@ here is uploaded or published — the GPS-bearing files never enter the repo, pu
 
 ## What it is / isn't
 
-- **Is:** a fast, dependency-free (stdlib) coverage + gap **planner** — it answers
-  *"where haven't I mapped yet, and where should I wardrive next?"* It bins the AP
-  locations in your exports into cells as a proxy for where you passed.
+- **Is:** a fast coverage + gap **planner** — it answers *"where haven't I mapped yet, and where
+  should I wardrive next?"* Runs on the Python **standard library alone** (no required
+  dependencies); **`duckdb` is optional but recommended**, since it unlocks the richer
+  **Overture** POI dataset (without it, business lookups fall back to OpenStreetMap). It bins the
+  AP locations in your exports into cells as a proxy for where you passed.
 - **Isn't a network locator.** It deliberately does **not** plot your individual
   captured SSIDs on the map — that's not the point. This tool is about **coverage and
   planning the next wardrive**, not looking up where a specific network lives. To find a
