@@ -368,14 +368,6 @@ here is uploaded or published — the GPS-bearing files never enter the repo, pu
   given network's location, use **[WiGLE](https://wigle.net)** itself. (The counts and
   the hotspot circles are *aggregate per-cell* totals; the hole popups name nearby
   *businesses* to target — never your own SSIDs.)
-- **Isn't (yet):** street-level routing or population weighting — see the roadmap below.
-
-## Roadmap
-
-- **Streets (phase 2):** overlay the real road network (OpenStreetMap) so
-  suggestions are named streets/segments, not just cells.
-- **Demographics (phase 2):** weight suggestions by population density (national census
-  data) so dense uncovered areas rank first.
 
 ## Tests
 
