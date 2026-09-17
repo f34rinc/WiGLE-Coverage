@@ -67,7 +67,7 @@ address/POI coverage varies worldwide.
 PRIVACY: inputs and the generated map carry real GPS - they stay LOCAL and are
 git-ignored. Nothing here is uploaded or published.
 
-stdlib only. Leaflet + CARTO/Esri basemap tiles load in your browser at view time.
+stdlib only. Leaflet + Esri basemap tiles (optional Stadia) load in your browser at view time.
 """
 import os
 import re

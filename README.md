@@ -323,6 +323,13 @@ useful to you, please consider chipping in to the projects that make it possible
 - **kumi.systems** — the fast Overpass mirror this tool uses as a **fallback**, run *free for the
   community* by [Kumi Systems](https://kumi.systems/). They don't solicit public donations — the
   way to support them is a thank-you and, if you ever need paid hosting, keeping them in mind.
+- **Esri** — the default **basemap tiles** (the satellite / street imagery under your coverage)
+  come from Esri's keyless ArcGIS Online basemaps. Esri is a **commercial company**, so there's
+  **no donation** — the way to respect it is to keep the **"© Esri" attribution** the map already
+  shows (required by [Esri's attribution terms](https://developers.arcgis.com/documentation/esri-and-data-attribution/))
+  and stay within their [terms of use](https://www.esri.com/content/dam/arcgisonline/docs/tou_summary.pdf).
+  Organizations can also contribute local data through **Esri's Community Maps Program** (part of
+  ArcGIS Living Atlas) to improve those basemaps.
 
 Not into giving money? **Mapping the businesses in your own "holes" back into OpenStreetMap is a
 donation too** — you're already standing in front of the unmapped ones, and it makes the next
