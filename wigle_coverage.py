@@ -1146,7 +1146,7 @@ D.recs.forEach(([r,c,label,nb,pois,more])=>{
   const b=bounds(r,c), ct=center(b);
   more = more||0;
   let html='<b>'+(label==='hole'?'Hole (skipped)':'Edge (frontier)')+'</b><br>'
-     +nb+' covered neighbours<br>'+maplink(ct[0],ct[1]);
+     +nb+' of 8 neighbours covered<br>'+maplink(ct[0],ct[1]);
   if (pois && pois.length){
     html += '<br><b>targets:</b><ol class="ptargets">'
           + pois.map(n => '<li>'+escapeHtml(n)+'</li>').join('') + '</ol>';
@@ -1248,8 +1248,8 @@ const lg = L.control({position:'bottomright'});
 lg.onAdd = function(){ const d=L.DomUtil.create('div','legend');
   d.innerHTML = '<b>__TITLE__</b>'
    + '<div><span class="sw" style="background:#0b525b"></span>covered (dense &rarr; light)</div>'
-   + '<div><span class="sw" style="background:#dc2626"></span>hole &ndash; skipped street</div>'
-   + '<div><span class="sw" style="background:#f59e0b"></span>edge &ndash; walk outward</div>'
+   + '<div><span class="sw" style="background:#dc2626"></span>hole &ndash; skipped (surrounded)</div>'
+   + '<div><span class="sw" style="background:#f59e0b"></span>edge &ndash; frontier (touches)</div>'
    + (D.hotspots && D.hotspots.length ? '<div style="margin-top:2px">hotspots (networks) <span class="hsramp"></span> fewer&rarr;more</div>' : '')
    + (D.track && D.track.length ? '<div><span class="sw" id="trkSw" style="background:#111827"></span>your track</div>' : '')
    + '<div style="margin-top:4px;color:#555">'+D.covered.length+' covered cells &middot; '

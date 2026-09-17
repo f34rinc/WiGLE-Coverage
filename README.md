@@ -144,11 +144,20 @@ The full flag list (grouped as `python wigle_coverage.py --help` prints them):
 
 ## How it reads the map
 
-- **Teal cells** = covered (darker = more networks logged there).
-- **Red cells** = *holes* — blank cells surrounded by your coverage: streets you
-  walked around but not through.
-- **Orange cells** = *edges* — blank cells touching your coverage: the natural
-  frontier to expand into.
+**Teal** cells are **covered** — a cell holds at least `--min-obs` networks (default 2), proof
+you passed through it. Each *uncovered* cell that touches coverage is then split by **how many of
+its 8 neighbours (sides + corners) are covered** — the cutoff is `--hole-threshold` (default 5).
+
+`■` = covered neighbour · `□` = uncovered · the **center** square is the cell being classified:
+
+| Its neighbourhood | Covered | Verdict |
+|:---:|:---:|:---|
+| `□ □ □`<br>`■ □ □`<br>`■ □ □` | **1–4** | 🟧 **edge** (frontier) — only *touches* your coverage; the outer boundary, walk outward |
+| `■ ■ ■`<br>`■ □ ■`<br>`■ ■ □` | **≥ 5** | 🟥 **hole** / *skipped* — *ringed* by coverage; a street you walked around but not through |
+| `□ □ □`<br>`□ □ □`<br>`□ □ □` | **0** | *(ignored)* — not next to any coverage, so it's never suggested |
+
+Raise `--hole-threshold` → stricter, so fewer cells count as holes (more become edges); lower it
+→ more holes. Each cell's map popup shows its exact covered-neighbour count.
 
 **Hotspots.** A toggle-able **"Hotspots (networks)"** layer marks your densest cells with
 WiGLE-style circles — sized by how many **networks** were captured there, with the count
