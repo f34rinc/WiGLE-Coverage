@@ -1,12 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="876" height="506" viewBox="0 0 876 506" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13">
-<rect x="0" y="0" width="876" height="506" rx="10" fill="#1c2128" stroke="#30363d"/>
-<rect x="1" y="1" width="874" height="34" rx="9" fill="#161b22"/>
-<rect x="1" y="25" width="874" height="10" fill="#161b22"/>
-<line x1="0" y1="34" x2="876" y2="34" stroke="#30363d"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="837" height="506" viewBox="0 0 837 506" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13">
+<rect x="0" y="0" width="837" height="506" rx="10" fill="#1c2128" stroke="#30363d"/>
+<rect x="1" y="1" width="835" height="34" rx="9" fill="#161b22"/>
+<rect x="1" y="25" width="835" height="10" fill="#161b22"/>
+<line x1="0" y1="34" x2="837" y2="34" stroke="#30363d"/>
 <circle cx="18" cy="17" r="6" fill="#ff5f56"/>
 <circle cx="38" cy="17" r="6" fill="#ffbd2e"/>
 <circle cx="58" cy="17" r="6" fill="#27c93f"/>
-<text x="438" y="21" text-anchor="middle" fill="#768390" font-size="12">python wigle_coverage.py</text>
+<text x="418" y="21" text-anchor="middle" fill="#768390" font-size="12">python wigle_coverage.py</text>
 <text x="20" y="63" xml:space="preserve"></text>
 <text x="20" y="83" xml:space="preserve"><tspan fill="#c9d1d9"> </tspan><tspan fill="#39c5cf" font-weight="700">wigle-coverage</tspan></text>
 <text x="20" y="103" xml:space="preserve"><tspan fill="#768390">========================================================</tspan></text>
@@ -24,7 +24,7 @@
 <text x="20" y="343" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#e3b341">data</tspan><tspan fill="#c9d1d9"> &lt;path&gt;    read a different folder</tspan></text>
 <text x="20" y="363" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#e3b341">pois</tspan><tspan fill="#c9d1d9">           toggle naming businesses in holes</tspan></text>
 <text x="20" y="383" xml:space="preserve"><tspan fill="#768390">-- POI source - where the business names come from -----</tspan></text>
-<text x="20" y="403" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#bc8cff" font-weight="700">source</tspan><tspan fill="#c9d1d9">         switch  </tspan><tspan fill="#bc8cff" font-weight="700">overture</tspan><tspan fill="#c9d1d9"> (default; far more businesses; pip install duckdb)  &lt;-&gt;  </tspan><tspan fill="#bc8cff" font-weight="700">osm</tspan><tspan fill="#c9d1d9"> (zero-setup)</tspan></text>
+<text x="20" y="403" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#bc8cff" font-weight="700">source</tspan><tspan fill="#c9d1d9">         switch  </tspan><tspan fill="#bc8cff" font-weight="700">overture</tspan><tspan fill="#c9d1d9"> (default; better dataset; pip install duckdb)  &lt;-&gt;  </tspan><tspan fill="#bc8cff" font-weight="700">osm</tspan><tspan fill="#c9d1d9"> (zero-setup)</tspan></text>
 <text x="20" y="423" xml:space="preserve"><tspan fill="#768390">-- go --------------------------------------------------</tspan></text>
 <text x="20" y="443" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#e3b341">go</tspan><tspan fill="#c9d1d9"> (or Enter)  build + open the map    </tspan><tspan fill="#e3b341">help</tspan><tspan fill="#c9d1d9">   commands    </tspan><tspan fill="#e3b341">q</tspan><tspan fill="#c9d1d9">   quit</tspan></text>
 <text x="20" y="463" xml:space="preserve"><tspan fill="#768390">========================================================</tspan></text>

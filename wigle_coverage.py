@@ -1703,7 +1703,7 @@ def _menu_help():
     print(f"  {y}data{r} <path>    read a different folder")
     print(f"  {y}pois{r}           toggle naming businesses in holes")
     print(_rule(label="POI source - where the business names come from"))
-    print(f"  {m}{C.b}source{r}         switch  {m}{C.b}overture{r} (default; far more businesses; "
+    print(f"  {m}{C.b}source{r}         switch  {m}{C.b}overture{r} (default; better dataset; "
           f"pip install duckdb)  <->  {m}{C.b}osm{r} (zero-setup)")
     print(_rule(label="go"))
     print(f"  {y}go{r} (or Enter)  build + open the map    {y}help{r}   commands    {y}q{r}   quit")
