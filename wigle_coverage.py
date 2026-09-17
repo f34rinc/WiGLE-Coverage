@@ -1699,7 +1699,7 @@ def _menu_status(st):
 
 def _menu_help():
     y, r, m = C.yellow, C.reset, C.magenta
-    print(_rule(label="view - which slice to map"))
+    print(_rule(label="which WiGLE run to map"))
     print(f"  {y}all{r}            whole history / union   {C.dim}(default){r}")
     print(f"  {y}runs{r}           list the sessions in the backup")
     print(f"  {y}run{r} N          just run N              {y}date{r} YYYY-MM-DD   just that date")
