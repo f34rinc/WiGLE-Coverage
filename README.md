@@ -5,7 +5,7 @@
 ![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)
 ![Platform: Windows · macOS · Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
 ![Dependencies: stdlib + optional DuckDB](https://img.shields.io/badge/deps-stdlib%20%2B%20optional%20DuckDB-brightgreen.svg)
-![POIs: Overture · OpenStreetMap](https://img.shields.io/badge/POIs-Overture%20%C2%B7%20OpenStreetMap-orange.svg)
+![POIs: Overture · OSM](https://img.shields.io/badge/POIs-Overture%20%C2%B7%20OSM-orange.svg)
 
 Turn your WiGLE exports into a **coverage map** that shows where you've walked and
 — more usefully — **recommends where you haven't**: the blank cells on the frontier
