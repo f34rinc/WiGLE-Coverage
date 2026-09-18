@@ -366,9 +366,11 @@ person's target list better, anywhere in the world.
 
 ## Privacy
 
-Your WiGLE exports and the generated map carry **real GPS coordinates**. They stay
-**local** and are git-ignored (`*.kml`, `*.csv`, `*.html`, `data/`, `out/`) — nothing
-here is uploaded or published — the GPS-bearing files never enter the repo, public though it is.
+This tool runs **entirely on your machine** — nothing it reads or generates is uploaded or
+published. Your WiGLE exports and the maps it builds carry **real GPS coordinates**, so the
+bundled `.gitignore` keeps GPS-bearing files (`*.kml`, `*.csv`, `*.html`, `data/`, `out/`) out
+of git: if you fork or commit, your coordinates won't land in a repo by accident. It's the same
+rule that keeps the maintainer's own coordinates out of this public repo.
 
 ## What it is / isn't
 
