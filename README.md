@@ -1,5 +1,12 @@
 # WiGLE coverage
 
+[![tests](https://github.com/f34rinc/wigle-coverage/actions/workflows/ci.yml/badge.svg)](https://github.com/f34rinc/wigle-coverage/actions/workflows/ci.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)
+![Platform: Windows · macOS · Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
+![Dependencies: stdlib + optional DuckDB](https://img.shields.io/badge/deps-stdlib%20%2B%20optional%20DuckDB-brightgreen.svg)
+![POIs: Overture · OpenStreetMap](https://img.shields.io/badge/POIs-Overture%20%C2%B7%20OpenStreetMap-orange.svg)
+
 Turn your WiGLE exports into a **coverage map** that shows where you've walked and
 — more usefully — **recommends where you haven't**: the blank cells on the frontier
 of your footprint (walk outward) and the holes inside it (streets you skipped). Built
