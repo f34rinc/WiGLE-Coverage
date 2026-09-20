@@ -42,8 +42,9 @@ python wigle_coverage.py
 ```
 
 Out of the box you get **coverage + the holes/edges to fill next**, your walked **track**,
-the **businesses named inside each hole** (a gap becomes a hit-list), and a **Hotspots**
-layer marking your densest cells. `-i` / `--menu` forces the menu even with other flags;
+the **businesses named inside each hole** (a gap becomes a hit-list), one-tap **Pin /
+Directions** links to walk to any target from your phone, and a **Hotspots** layer marking
+your densest cells. `-i` / `--menu` forces the menu even with other flags;
 `--data DIR` points at a different folder. Everything also works as one-shot CLI flags for
 scripting (full list under [Command line](#use-it)).
 
@@ -199,7 +200,12 @@ at once (coverage *and* path straight from the backup, no KML needed).
 
 Each cell's popup gives its center coordinate plus an **Open in OpenStreetMap** link,
 so one click drops you at that exact spot with full business/place names (the base
-tiles don't carry those). The top-right switcher offers Streets, Light gray,
+tiles don't carry those). Every **hole/edge** popup and every **Targets-panel** row
+also gets two **navigate buttons** — **📍 Pin** (opens the target in your phone's
+default maps app) and **🧭 Directions** (a walking route from where you are, so you
+can eyeball "it's ~2 blocks NE" instantly). These hand off to your maps app, so they
+need no location permission, no server, and no special setup — they work however you
+open the map, on the phone or desktop. The top-right switcher offers Streets, Light gray,
 Satellite, and **Satellite + labels** — the last is handy for orienting among
 look-alike highrise blocks.
 

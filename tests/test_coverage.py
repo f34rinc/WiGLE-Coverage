@@ -505,6 +505,19 @@ class TestLeafletInline(unittest.TestCase):
         self.assertIn("<style>", html)
         self.assertIn("1.9.4", html)                           # the inlined Leaflet source
 
+    def test_rendered_map_has_navigate_links(self):
+        import tempfile
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        recs = [{"cell": (1, 1), "label": "hole", "covered_neighbors": 5}]
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "m.html")
+            wc.render_html({(0, 0): 3, (0, 1): 3}, recs, dlat, dlon, 2, out)
+            with open(out, encoding="utf-8") as fh:
+                html = fh.read()
+        self.assertIn("navlinks(", html)               # helper wired into popups + panel
+        self.assertIn('href="geo:', html)              # Pin -> default maps app, no secure context
+        self.assertIn("google.com/maps/dir/", html)    # Directions -> walking route
+
 
 class TestHotspots(unittest.TestCase):
     def test_percentile_nearest_rank(self):

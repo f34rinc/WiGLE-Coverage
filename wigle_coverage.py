@@ -1181,6 +1181,10 @@ __LEAFLET_JS__
   .hslabel::before{display:none}
   .hsramp{display:inline-block;width:54px;height:10px;vertical-align:-1px;border:1px solid #0004;
           border-radius:2px;background:linear-gradient(90deg,#fed976,#feb24c,#fd8d3c,#f03b20,#bd0026)}
+  .navrow{margin-top:6px}
+  a.nav{display:inline-block;margin:0 6px 0 0;padding:6px 11px;border-radius:8px;
+        background:#2563eb;color:#fff;text-decoration:none;font-weight:600;font-size:12px}
+  a.nav:active{background:#1d4ed8}
 </style></head><body><div id="map"></div>
 <script>
 const D = __DATA__;
@@ -1219,6 +1223,14 @@ function maplink(la,lo){ return la.toFixed(5)+', '+lo.toFixed(5)
   +'<br><a href="https://www.openstreetmap.org/?mlat='+la.toFixed(5)+'&mlon='+lo.toFixed(5)
   +'#map=18/'+la.toFixed(5)+'/'+lo.toFixed(5)
   +'" target="_blank" rel="noopener">Open in OpenStreetMap</a>'; }
+// native-maps handoff - no GPS permission / secure context / server needed. "Pin" uses
+// the geo: scheme (your DEFAULT maps app, incl. offline ones); "Directions" gives a
+// walking route from your current location via Google Maps.
+function navlinks(la,lo){ const q=la.toFixed(6)+','+lo.toFixed(6);
+  return '<div class="navrow">'
+    + '<a class="nav" href="geo:'+q+'?q='+q+'(Target)">&#128205; Pin</a>'
+    + '<a class="nav" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination='+q+'&travelmode=walking">&#129517; Directions</a>'
+    + '</div>'; }
 
 // coverage (where you've been)
 D.covered.forEach(([r,c,n])=>{
@@ -1235,7 +1247,7 @@ D.recs.forEach(([r,c,label,nb,pois,more])=>{
   const b=bounds(r,c), ct=center(b);
   more = more||0;
   let html='<b>'+(label==='hole'?'Hole (skipped)':'Edge (frontier)')+'</b><br>'
-     +nb+' of 8 neighbours covered<br>'+maplink(ct[0],ct[1]);
+     +nb+' of 8 neighbours covered<br>'+maplink(ct[0],ct[1])+navlinks(ct[0],ct[1]);
   if (pois && pois.length){
     html += '<br><b>targets:</b><ol class="ptargets">'
           + pois.map(n => '<li>'+escapeHtml(n)+'</li>').join('') + '</ol>';
@@ -1261,7 +1273,7 @@ if (targetHoles.length){
       + '<div class="tnames">'
       + h.names.map(n => '<div>'+escapeHtml(n)+'</div>').join('')
       + (h.more ? '<div class="tmore">+'+h.more+' more</div>' : '')
-      + '</div></li>').join('');
+      + '</div>' + navlinks(h.center[0], h.center[1]) + '</li>').join('');
     d.innerHTML = '<button class="tcol" title="collapse">&#8211;</button>'
       + '<b>&#127919; Targets ('+targetHoles.length+')</b>'+doc
       + '<ul class="tlist">'+rows+'</ul>';
@@ -1269,6 +1281,7 @@ if (targetHoles.length){
     L.DomEvent.disableScrollPropagation(d);
     const ul = d.querySelector('.tlist'), btn = d.querySelector('.tcol');
     ul.addEventListener('click', function(ev){       // row -> fly to the hole + open its popup
+      if(ev.target.closest('a.nav')) return;         // let Navigate links open maps, don't fly
       const li = ev.target.closest('li[data-i]'); if(!li) return;
       const h = targetHoles[+li.dataset.i];
       map.flyTo(h.center, Math.max(map.getZoom(), 17));
