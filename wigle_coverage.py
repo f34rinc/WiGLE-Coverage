@@ -31,7 +31,7 @@ CLI:
                              [--hole-threshold 5] [--track "WiGLE Database Backup"]
                              [--data DIR] [-i] [--out map.html] [--no-open]
 
-YOUR ACTUAL PATH: pass --track pointing at a WiGLE SQLite backup and the map adds a
+YOUR ACTUAL PATH: pass --track pointing at a WiGLE SQLite backup (or a .gpx) and the map adds a
 toggle-able polyline of where you actually walked (black by default, recolorable via the
 in-map "Track color" picker; raw GPS fixes from its `location` table, split into segments
 on time gaps). The cells come from the KML/CSV;
@@ -411,6 +411,55 @@ def parse_sqlite_track(path):
     finally:
         con.close()
     return [(int(t), float(la), float(lo)) for (t, la, lo) in rows]
+
+
+# ---- track from a GPX file (a GPS path only - no networks) -------------------
+def _is_gpx(path):
+    """A .gpx track/route file - by extension, else by a <gpx tag near the top."""
+    if str(path).lower().endswith(".gpx"):
+        return True
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return "<gpx" in fh.read(400).lower()
+    except OSError:
+        return False
+
+
+_GPX_PT = re.compile(r"<(?:trkpt|rtept)\b([^>]*)>", re.I)
+_GPX_LAT = re.compile(r'\blat\s*=\s*"([^"]+)"', re.I)
+_GPX_LON = re.compile(r'\blon\s*=\s*"([^"]+)"', re.I)
+
+
+def parse_gpx_track(path):
+    """Track/route segments from a GPX file as [[[lat,lon],...], ...] - ready to draw
+    exactly like the SQLite track. Each <trkseg> and each <rte> becomes one segment
+    (so separate walks don't join with a straight line); fixes that barely moved (GPS
+    jitter) are dropped. GPX carries GPS points only, no networks, so it feeds --track,
+    never coverage."""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    blocks = (re.findall(r"<trkseg\b.*?</trkseg>", text, re.I | re.S)
+              + re.findall(r"<rte\b.*?</rte>", text, re.I | re.S)) or [text]
+    minmove = TRACK_MIN_MOVE_M / EARTH_M_PER_DEG
+    segs = []
+    for blk in blocks:
+        seg, last = [], None
+        for m in _GPX_PT.finditer(blk):
+            la, lo = _GPX_LAT.search(m.group(1)), _GPX_LON.search(m.group(1))
+            if not (la and lo):
+                continue
+            try:
+                a, o = float(la.group(1)), float(lo.group(1))
+            except ValueError:
+                continue
+            if not (-90 <= a <= 90 and -180 <= o <= 180) or (a == 0 and o == 0):
+                continue
+            if last is None or abs(a - last[0]) >= minmove or abs(o - last[1]) >= minmove:
+                seg.append([a, o])
+                last = (a, o)
+        if len(seg) >= 2:
+            segs.append(seg)
+    return segs
 
 
 def parse_sqlite_networks(path):
@@ -1372,10 +1421,17 @@ def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=No
                  [p[0] for p in poi_by_hole.get(tuple(x["cell"]), [])],
                  more_by_hole.get(tuple(x["cell"]), 0)] for x in recs]
     all_cells = list(covered) + [x["cell"] for x in recs]
-    rows = [r for r, _ in all_cells] or [0]
-    cols = [c for _, c in all_cells] or [0]
-    fit = [[min(rows) * dlat, min(cols) * dlon],
-           [(max(rows) + 1) * dlat, (max(cols) + 1) * dlon]]
+    if all_cells:
+        rows = [r for r, _ in all_cells]
+        cols = [c for _, c in all_cells]
+        fit = [[min(rows) * dlat, min(cols) * dlon],
+               [(max(rows) + 1) * dlat, (max(cols) + 1) * dlon]]
+    elif track_segments:                          # track-only: fit the view to the path
+        lats = [p[0] for seg in track_segments for p in seg]
+        lons = [p[1] for seg in track_segments for p in seg]
+        fit = [[min(lats), min(lons)], [max(lats), max(lons)]]
+    else:
+        fit = [[0, 0], [0, 0]]
     data = {"dlat": dlat, "dlon": dlon, "covered": cov_list, "recs": rec_list,
             "fit": fit, "track": track_segments or [], "mapKey": map_key or "",
             "targetsDoc": targets_doc or "", "hotspots": hotspots or []}
@@ -1463,7 +1519,8 @@ def parse_args():
     g.add_argument("paths", nargs="*",
                    help="KML/CSV, a .sqlite backup, a folder, or globs; empty = the ./data folder")
     g.add_argument("--track", "--backup", "--db", dest="track", metavar="BACKUP",
-                   help="the WiGLE .sqlite backup - adds your path, and is the source for the run views")
+                   help="a WiGLE .sqlite backup, or a .gpx - adds your walked path (a .gpx on "
+                        "its own maps just the track); the .sqlite is also the source for run views")
     g.add_argument("--data", metavar="DIR",
                    help=f"folder to read when no path is given (default: {DATA_DIR})")
 
@@ -1513,6 +1570,29 @@ def parse_args():
     return p.parse_args()
 
 
+def _render_track_only(args, gpx_track, t_start):
+    """GPX handed in with no coverage source: render a map that's just the path,
+    with the view fit to the track."""
+    track_segs = parse_gpx_track(gpx_track)
+    if not track_segs:
+        print("No track points found in the GPX.")
+        return None
+    pts = [p for seg in track_segs for p in seg]
+    dlat, dlon = meters_to_deg(args.cell_size, sum(p[0] for p in pts) / len(pts))
+    base_dir = os.path.dirname(os.path.abspath(gpx_track))
+    out = args.out or os.path.join(base_dir, f"wigle_track_{datetime.date.today():%Y%m%d}.html")
+    print(f"track-only view from {os.path.basename(gpx_track)}...")
+    render_html({}, [], dlat, dlon, args.min_obs, out,
+                track_segments=track_segs, map_key=read_map_key())
+    print(_rule("="))
+    print(f"  track only (GPX): {C.b}{sum(len(s) for s in track_segs):,}{C.reset} points "
+          f"in {len(track_segs)} segment(s)")
+    print(f"  {C.green}map:{C.reset} {out}")
+    print(f"  {C.b}time:{C.reset} {_fmt_secs(time.perf_counter() - t_start)} start -> map")
+    print(_rule("="))
+    return out
+
+
 def run(args):
     t_start = time.perf_counter()      # wall-clock: start -> .html generated
     poi_secs = 0.0                     # time spent in the OSM/Overpass lookup (usually the bulk)
@@ -1526,12 +1606,27 @@ def run(args):
     inputs = expand_inputs(paths)
     sqlite_files = [f for f in inputs if _is_sqlite(f)]
     cover_files = [f for f in inputs if f not in sqlite_files]
-    sqlite_path = args.track
+    # A GPX (via --track or a positional path) is a TRACK source only - a GPS path with
+    # no networks, so it can draw your route but never coverage.
+    gpx_track = None
+    if args.track and _is_gpx(args.track):
+        gpx_track, sqlite_path = args.track, None
+    else:
+        sqlite_path = args.track
+    gpx_pos = [f for f in cover_files if _is_gpx(f)]
+    if gpx_pos:
+        gpx_track = gpx_track or gpx_pos[0]
+        cover_files = [f for f in cover_files if not _is_gpx(f)]
     if not sqlite_path and sqlite_files:
         sqlite_files.sort(key=os.path.getmtime, reverse=True)   # newest backup wins
         sqlite_path = sqlite_files[0]
         if len(sqlite_files) > 1:
             print(f"using newest SQLite backup: {os.path.basename(sqlite_path)}")
+
+    # Track-only: a GPX handed in with no coverage source at all -> just draw the path.
+    if gpx_track and not cover_files and not sqlite_path \
+            and not args.list_runs and not (args.run or args.date):
+        return _render_track_only(args, gpx_track, t_start)
 
     # --list-runs: enumerate sessions in the backup and exit (no map)
     if args.list_runs:
@@ -1657,7 +1752,9 @@ def run(args):
               f"{C.dim}(peak {max(h[2] for h in hotspots):,}){C.reset}")
 
     track_segs = None
-    if track_fixes:
+    if gpx_track:
+        track_segs = parse_gpx_track(gpx_track)
+    elif track_fixes:
         track_segs = build_track_segments(
             track_fixes, args.track_gap * 60_000, TRACK_MIN_MOVE_M / EARTH_M_PER_DEG)
 

@@ -691,5 +691,59 @@ class TestPoliteRetry(unittest.TestCase):
         self.assertEqual(self.waits, [wc.OVERPASS_RETRY_AFTER_CAP_S])
 
 
+class TestGpxTrack(unittest.TestCase):
+    GPX = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+           '<gpx version="1.1" creator="test">\n'
+           '  <trk><name>walk</name><trkseg>\n'
+           '    <trkpt lat="40.4375" lon="-111.9255"><ele>1400</ele></trkpt>\n'
+           '    <trkpt lat="40.4385" lon="-111.9245"></trkpt>\n'
+           '  </trkseg></trk>\n'
+           '</gpx>\n')
+
+    def _write(self, d):
+        p = os.path.join(d, "route.gpx")
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(self.GPX)
+        return p
+
+    def test_is_gpx(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertTrue(wc._is_gpx(self._write(d)))
+
+    def test_parse_gpx_track(self):
+        with tempfile.TemporaryDirectory() as d:
+            segs = wc.parse_gpx_track(self._write(d))
+        self.assertEqual(len(segs), 1)                 # one <trkseg> -> one segment
+        self.assertEqual(len(segs[0]), 2)              # two points
+        self.assertAlmostEqual(segs[0][0][0], 40.4375, places=4)
+        self.assertAlmostEqual(segs[0][0][1], -111.9255, places=4)
+
+    def test_gpx_route_and_null_island(self):
+        gpx = ('<gpx><rte>'
+               '<rtept lat="0" lon="0"></rtept>'            # null island -> dropped
+               '<rtept lat="40.44" lon="-111.92"></rtept>'
+               '<rtept lat="40.45" lon="-111.93"></rtept>'
+               '</rte></gpx>')
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "r.gpx")
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write(gpx)
+            segs = wc.parse_gpx_track(p)
+        self.assertEqual(len(segs), 1)                 # <rte> -> one segment
+        self.assertEqual(len(segs[0]), 2)              # (0,0) dropped, 2 kept
+
+    def test_track_only_render(self):
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        track = [[[40.4375, -111.9255], [40.4385, -111.9245]]]
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "m.html")
+            wc.render_html({}, [], dlat, dlon, 2, out, track_segments=track)   # no coverage
+            with open(out, encoding="utf-8") as fh:
+                html = fh.read()
+        self.assertIn("40.4375", html)                 # track coords embedded
+        self.assertIn('"covered": []', html)           # empty coverage still renders
+        self.assertNotIn('"fit": [[0, 0]', html)       # fit is the track, not degenerate (0,0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

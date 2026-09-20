@@ -113,7 +113,7 @@ The full flag list (grouped as `python wigle_coverage.py --help` prints them):
 | flag | meaning |
 |---|---|
 | `paths …` | KML/CSV, a `.sqlite` backup, a folder, or globs; empty = the `./data` folder |
-| `--track` / `--backup` / `--db BACKUP` | the WiGLE `.sqlite` backup — adds your path *and* powers the run views |
+| `--track` / `--backup` / `--db BACKUP` | a WiGLE `.sqlite` backup **or a `.gpx`** — adds your path (a `.gpx` alone maps just the track); the `.sqlite` also powers the run views |
 | `--data DIR` | folder to read when no path is given (default: `./data`) |
 
 **Views — which slice to map**
@@ -183,6 +183,12 @@ from the backup's `location` table, split into segments on time gaps (so separat
 join with a straight line). Cells come from the KML/CSV; the track from the SQLite.
 Lay it over the cells to see exactly which streets your coverage came from. A
 bottom-left dropdown recolors the track line.
+
+**Just a GPX?** `--track` also accepts a **`.gpx`** (a GPS-watch / logger / route export).
+Handed in *alone* — no KML/CSV/SQLite — it renders a **track-only map**: just your path over
+the basemap, view fit to the route (no coverage cells, since a GPX carries GPS points but no
+networks). Each `<trkseg>` / `<rte>` becomes its own segment. Pass coverage data too and the
+GPX simply supplies the path in place of a SQLite backup.
 
 **Historical runs vs a single run.** Because the SQLite backup carries timestamps
 (a KML doesn't), you can slice it by session:
