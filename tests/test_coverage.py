@@ -838,6 +838,14 @@ class TestMapInteractions(unittest.TestCase):
     def test_no_poi_hole_note(self):
         self.assertIn("No named targets mapped here", self._html())
 
+    def test_panel_controls_present(self):
+        html = self._html()
+        self.assertIn("tsortck", html)                  # nearest-sort on/off toggle
+        self.assertIn("function markCovered", html)     # check a target off
+        self.assertIn("function resetCovered", html)    # restore all
+        self.assertIn("treset", html)                   # reset button
+        self.assertIn("tdone", html)                    # per-row check-off button
+
 
 class TestRunNetworkCounts(unittest.TestCase):
     def _make_db(self, path):

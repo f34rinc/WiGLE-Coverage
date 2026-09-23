@@ -1278,6 +1278,14 @@ __LEAFLET_JS__
   .targets .tnames{margin-top:3px;padding-left:3px}
   .targets .tnames div{padding:1px 0}
   .targets .tmore{color:#777;font-style:italic}
+  .targets .tsort{display:block;margin:4px 0 2px;font-size:11px;color:#555;cursor:pointer;user-select:none}
+  .targets .tsort input{vertical-align:middle;margin:0 4px 0 0}
+  .targets .tdone{float:right;border:1px solid #16a34a;background:#fff;color:#16a34a;border-radius:4px;
+                  font:inherit;font-size:11px;line-height:1;cursor:pointer;padding:1px 5px;margin-left:6px}
+  .targets .tdone:hover{background:#16a34a;color:#fff}
+  .targets .treset{border:1px solid #bbb;background:#fff;color:#555;border-radius:4px;font:inherit;
+                   font-size:12px;line-height:1;cursor:pointer;padding:1px 7px;margin:0 0 2px}
+  .targets .treset:hover{background:#f3f7f7;color:#111}
   .leaflet-popup-content .ptargets{margin:3px 0 0;padding-left:20px}
   .leaflet-popup-content .ptargets li{margin:2px 0;line-height:1.3}
   .leaflet-popup-content b{color:#0b525b}
@@ -1370,17 +1378,48 @@ D.recs.forEach(([r,c,label,nb,pois,more])=>{
   }
 });
 
-// clicking a hole cell bumps that hole's row to the TOP of the Targets panel + flashes it
+// clicking a hole cell re-sorts the Targets panel by distance FROM that cell (nearest
+// first, the clicked one on top + flashed) - so you can plan the hop to the next-closest gap
 function bumpTarget(id){
+  const ck = document.getElementById('tsortck');
+  if (ck && !ck.checked) return;                     // proximity sort toggled off -> leave panel as-is
   const ul = document.querySelector('.targets .tlist'); if(!ul) return;
-  const li = ul.querySelector('li[data-id="'+id+'"]'); if(!li) return;
+  const origin = targetHoles.find(x=> x.id===id); if(!origin) return;
+  const olat = origin.center[0], olon = origin.center[1];
+  const k = Math.cos(olat*Math.PI/180);              // scale lon so the ranking isn't skewed by latitude
+  const order = targetHoles.slice().sort((a,b)=>{
+    const da=(a.center[0]-olat)**2 + ((a.center[1]-olon)*k)**2;
+    const db=(b.center[0]-olat)**2 + ((b.center[1]-olon)*k)**2;
+    return da - db;                                  // nearest first (clicked cell = distance 0)
+  });
   if (ul.style.display==='none'){                    // expand the list if it was collapsed
     ul.style.display=''; const b=ul.parentElement.querySelector('.tcol'); if(b) b.innerHTML='&#8211;';
   }
-  ul.prepend(li);
-  li.scrollIntoView({block:'nearest'});
-  li.classList.remove('tbump'); void li.offsetWidth; li.classList.add('tbump');  // restart the flash
-  clearTimeout(li._bt); li._bt = setTimeout(()=> li.classList.remove('tbump'), 1700);
+  order.forEach(h=>{ const li=ul.querySelector('li[data-id="'+h.id+'"]'); if(li) ul.appendChild(li); });
+  ul.scrollTop = 0;                                  // reveal the clicked cell at the top
+  const top = ul.querySelector('li[data-id="'+id+'"]');
+  if (top){ top.classList.remove('tbump'); void top.offsetWidth; top.classList.add('tbump');
+            clearTimeout(top._bt); top._bt = setTimeout(()=> top.classList.remove('tbump'), 1700); }
+}
+
+// checking a target off ("covered") hides its row + dims its cell green; reset restores all
+function _tcount(){
+  const c=document.querySelector('.targets .tcount'), ul=document.querySelector('.targets .tlist');
+  if(c&&ul) c.textContent=[...ul.querySelectorAll('li[data-id]')].filter(x=>x.style.display!=='none').length;
+}
+function markCovered(h, li){
+  h.covered=true;
+  if(h.layer){ h.layer.closePopup(); h.layer.setStyle({color:'#16a34a', fillColor:'#16a34a', fillOpacity:.15, weight:1}); }
+  li.style.display='none';                            // hide (not remove) so reset can restore it
+  _tcount();
+}
+function resetCovered(){
+  targetHoles.forEach(h=>{ if(!h.covered) return;
+    h.covered=false;
+    if(h.layer) h.layer.setStyle({color:'#dc2626', fillColor:'#dc2626', fillOpacity:.35, weight:2});
+    const li=document.querySelector('.targets li[data-id="'+h.id+'"]'); if(li) li.style.display='';
+  });
+  _tcount();
 }
 
 // target panel (top-left) - only when --pois turned up businesses in holes
@@ -1393,13 +1432,17 @@ if (targetHoles.length){
       ? '<a class="tdoc" href="'+encodeURI(D.targetsDoc)+'" target="_blank" rel="noopener">open printable list &#8599;</a>'
       : '';
     const rows = targetHoles.map(h=>
-      '<li data-id="'+h.id+'"><span class="tn">'+h.names.length+'</span> targets'
+      '<li data-id="'+h.id+'"><button class="tdone" title="Mark covered: hides this cell from the list and dims it green on the map (use the reset button to bring it back)">&#10003;</button>'
+      + '<span class="tn">'+h.names.length+'</span> targets'
       + '<div class="tnames">'
       + h.names.map(n => '<div>'+escapeHtml(n)+'</div>').join('')
       + (h.more ? '<div class="tmore">+'+h.more+' more</div>' : '')
       + '</div>' + navlinks(h.center[0], h.center[1]) + '</li>').join('');
     d.innerHTML = '<button class="tcol" title="collapse">&#8211;</button>'
-      + '<b>&#127919; Targets ('+targetHoles.length+')</b>'+doc
+      + '<b>&#127919; Targets (<span class="tcount">'+targetHoles.length+'</span>)</b>'+doc
+      + '<label class="tsort" title="When on, clicking a hole cell on the map reorders this list nearest-first from that cell, so you can plan the hop to the next-closest gap">'
+      + '<input type="checkbox" id="tsortck" checked> click a cell &rarr; sort by nearest</label>'
+      + '<button class="treset" title="Reset: restore every checked-off cell back to the list and its red colour on the map (undoes the temporary covered marks)">&#8634;</button>'
       + '<ul class="tlist">'+rows+'</ul>';
     L.DomEvent.disableClickPropagation(d);
     L.DomEvent.disableScrollPropagation(d);
@@ -1408,6 +1451,7 @@ if (targetHoles.length){
       if(ev.target.closest('a.nav')) return;         // let Navigate links open maps, don't fly
       const li = ev.target.closest('li[data-id]'); if(!li) return;
       const h = targetHoles.find(x=> x.id === +li.dataset.id); if(!h) return;
+      if(ev.target.closest('.tdone')){ markCovered(h, li); return; }   // check off -> drop row + dim cell
       map.flyTo(h.center, Math.max(map.getZoom(), 17));
       h.layer.openPopup();
     });
@@ -1416,6 +1460,8 @@ if (targetHoles.length){
       ul.style.display = hidden ? '' : 'none';
       btn.innerHTML = hidden ? '&#8211;' : '+';
     });
+    const rst = d.querySelector('.treset');           // restore all checked-off cells
+    if(rst) rst.addEventListener('click', resetCovered);
     return d;
   };
   panel.addTo(map);
