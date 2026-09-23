@@ -351,9 +351,6 @@ pace it slowly. Both are equally up to date. A few things keep a bad Overpass da
   other mirror carries on;
 - **per-mirror pacing** — the overloaded reference instance is paced more slowly than the primary.
 
-*(`overpass.openstreetmap.fr` was dropped in Sept 2026 for returning `403 Forbidden` to the tool's
-requests. If Overpass is having a rough day everywhere, `--poi-source overture` skips it entirely.)*
-
 POIs are © OpenStreetMap contributors (ODbL); treat the result as a "known targets" list, not an
 exhaustive one.
 
