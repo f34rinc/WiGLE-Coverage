@@ -1271,6 +1271,8 @@ __LEAFLET_JS__
   .targets .tlist{list-style:none;margin:6px 0 0;padding:0;max-height:42vh;overflow:auto}
   .targets .tlist>li{padding:5px 4px;border-top:1px solid #eee;cursor:pointer;font-size:12px;line-height:1.35}
   .targets .tlist>li:hover{background:#f3f7f7}
+  .targets .tlist>li.tbump{animation:tbump 1.7s ease-out}
+  @keyframes tbump{from{background:#ffdf7e}to{background:transparent}}
   .targets .tn{display:inline-block;min-width:18px;text-align:center;background:#dc2626;color:#fff;
                border-radius:999px;font-size:11px;font-weight:700;padding:0 5px;margin-right:4px}
   .targets .tnames{margin-top:3px;padding-left:3px}
@@ -1279,6 +1281,7 @@ __LEAFLET_JS__
   .leaflet-popup-content .ptargets{margin:3px 0 0;padding-left:20px}
   .leaflet-popup-content .ptargets li{margin:2px 0;line-height:1.3}
   .leaflet-popup-content b{color:#0b525b}
+  .leaflet-popup-content .notgt{color:#777}
   .hslabel{background:none;border:none;box-shadow:none;padding:0;margin:0;color:#fff;
            font-weight:700;font-size:11px;text-shadow:0 0 2px #000,0 0 2px #000,0 0 1px #000}
   .hslabel::before{display:none}
@@ -1355,12 +1358,30 @@ D.recs.forEach(([r,c,label,nb,pois,more])=>{
     html += '<br><b>targets:</b><ol class="ptargets">'
           + pois.map(n => '<li>'+escapeHtml(n)+'</li>').join('') + '</ol>';
     if (more) html += '<i>+'+more+' more</i>';
+  } else if (label==='hole'){                        // a skipped cell we searched, but no businesses mapped
+    html += '<br><i class="notgt">No named targets mapped here.</i>';
   }
   const rect = L.rectangle(b, {color:RC[label], weight:2, fillColor:RC[label], fillOpacity:.35})
    .bindPopup(html, {maxWidth:340}).addTo(map);
-  if (label==='hole' && pois && pois.length)
-    targetHoles.push({center:ct, layer:rect, names:pois, more:more});
+  if (label==='hole' && pois && pois.length){
+    const entry = {center:ct, layer:rect, names:pois, more:more, id:targetHoles.length};
+    targetHoles.push(entry);
+    rect.on('click', ()=> bumpTarget(entry.id));   // clicking the hole cell bumps its panel row
+  }
 });
+
+// clicking a hole cell bumps that hole's row to the TOP of the Targets panel + flashes it
+function bumpTarget(id){
+  const ul = document.querySelector('.targets .tlist'); if(!ul) return;
+  const li = ul.querySelector('li[data-id="'+id+'"]'); if(!li) return;
+  if (ul.style.display==='none'){                    // expand the list if it was collapsed
+    ul.style.display=''; const b=ul.parentElement.querySelector('.tcol'); if(b) b.innerHTML='&#8211;';
+  }
+  ul.prepend(li);
+  li.scrollIntoView({block:'nearest'});
+  li.classList.remove('tbump'); void li.offsetWidth; li.classList.add('tbump');  // restart the flash
+  clearTimeout(li._bt); li._bt = setTimeout(()=> li.classList.remove('tbump'), 1700);
+}
 
 // target panel (top-left) - only when --pois turned up businesses in holes
 if (targetHoles.length){
@@ -1371,8 +1392,8 @@ if (targetHoles.length){
     const doc = D.targetsDoc
       ? '<a class="tdoc" href="'+encodeURI(D.targetsDoc)+'" target="_blank" rel="noopener">open printable list &#8599;</a>'
       : '';
-    const rows = targetHoles.map((h,i)=>
-      '<li data-i="'+i+'"><span class="tn">'+h.names.length+'</span> targets'
+    const rows = targetHoles.map(h=>
+      '<li data-id="'+h.id+'"><span class="tn">'+h.names.length+'</span> targets'
       + '<div class="tnames">'
       + h.names.map(n => '<div>'+escapeHtml(n)+'</div>').join('')
       + (h.more ? '<div class="tmore">+'+h.more+' more</div>' : '')
@@ -1385,8 +1406,8 @@ if (targetHoles.length){
     const ul = d.querySelector('.tlist'), btn = d.querySelector('.tcol');
     ul.addEventListener('click', function(ev){       // row -> fly to the hole + open its popup
       if(ev.target.closest('a.nav')) return;         // let Navigate links open maps, don't fly
-      const li = ev.target.closest('li[data-i]'); if(!li) return;
-      const h = targetHoles[+li.dataset.i];
+      const li = ev.target.closest('li[data-id]'); if(!li) return;
+      const h = targetHoles.find(x=> x.id === +li.dataset.id); if(!h) return;
       map.flyTo(h.center, Math.max(map.getZoom(), 17));
       h.layer.openPopup();
     });

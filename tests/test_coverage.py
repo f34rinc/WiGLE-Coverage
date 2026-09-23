@@ -816,6 +816,29 @@ class TestParsersCarryBssid(unittest.TestCase):
                              [("AA:BB:CC:11:22:33", 40.0, -111.0)])
 
 
+class TestMapInteractions(unittest.TestCase):
+    """The click-a-hole-cell -> bump-its-panel-row wiring and the no-POI-hole note
+    are JS/CSS baked into the map template; guard that they stay embedded."""
+    def _html(self):
+        dlat, dlon = wc.meters_to_deg(50, 40.0)
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "m.html")
+            wc.render_html({}, [], dlat, dlon, 2, out,
+                           track_segments=[[[40.0, -111.0], [40.001, -111.001]]])
+            with open(out, encoding="utf-8") as fh:
+                return fh.read()
+
+    def test_cell_click_bumps_panel_row(self):
+        html = self._html()
+        self.assertIn("function bumpTarget", html)          # helper exists
+        self.assertIn("rect.on('click'", html)              # cells call it
+        self.assertIn("data-id", html)                      # rect<->row linkage
+        self.assertIn("tbump", html)                        # highlight flash
+
+    def test_no_poi_hole_note(self):
+        self.assertIn("No named targets mapped here", self._html())
+
+
 class TestRunNetworkCounts(unittest.TestCase):
     def _make_db(self, path):
         import sqlite3
