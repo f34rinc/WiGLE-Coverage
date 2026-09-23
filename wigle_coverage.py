@@ -315,19 +315,28 @@ def recommend(coverage, min_obs, hole_threshold):
 
 # ---- input parsing ----------------------------------------------------------
 _KML_COORD = re.compile(r"<coordinates>\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)")
+_KML_PLACEMARK = re.compile(r"<Placemark\b.*?</Placemark>", re.IGNORECASE | re.DOTALL)
+_MAC_RE = re.compile(r"\b([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\b")
 
 
 def parse_kml(path):
-    """Yield (lat, lon) from every <Point><coordinates>lon,lat[,alt]. WiGLE KML
-    placemarks are Points, so this captures one location per logged network."""
+    """Yield (bssid, lat, lon) for each WiGLE KML placemark - one per logged network.
+    The BSSID (the first MAC in the placemark, from its 'Network ID') lets the caller
+    dedupe the same AP seen across unioned exports; it's '' when a placemark carries no
+    MAC, and those points are kept as unique."""
     with open(path, encoding="utf-8", errors="ignore") as fh:
         text = fh.read()
-    for lon, lat in _KML_COORD.findall(text):     # KML order is lon,lat
-        yield float(lat), float(lon)
+    for block in _KML_PLACEMARK.findall(text):
+        m = _KML_COORD.search(block)              # KML order is lon,lat
+        if not m:
+            continue
+        mac = _MAC_RE.search(block)
+        yield (mac.group(1).upper() if mac else ""), float(m.group(2)), float(m.group(1))
 
 
 def parse_wigle_csv(path):
-    """Yield (lat, lon) from a WiGLE .csv (CurrentLatitude / CurrentLongitude)."""
+    """Yield (bssid, lat, lon) from a WiGLE .csv (MAC + CurrentLatitude/Longitude).
+    The BSSID lets the caller dedupe an AP seen across unioned exports; '' when absent."""
     with open(path, encoding="utf-8", errors="ignore") as fh:
         lines = fh.read().splitlines()
     hdr_idx = next((i for i, ln in enumerate(lines)
@@ -339,6 +348,7 @@ def parse_wigle_csv(path):
         la, lo = cols.index("CurrentLatitude"), cols.index("CurrentLongitude")
     except ValueError:
         return
+    mac_i = cols.index("MAC") if "MAC" in cols else None
     for ln in lines[hdr_idx + 1:]:
         parts = ln.split(",")
         if len(parts) <= max(la, lo):
@@ -348,7 +358,8 @@ def parse_wigle_csv(path):
         except ValueError:
             continue
         if lat or lon:
-            yield lat, lon
+            mac = parts[mac_i].strip().upper() if (mac_i is not None and len(parts) > mac_i) else ""
+            yield mac, lat, lon
 
 
 def parse_any(path):
@@ -358,6 +369,21 @@ def parse_any(path):
     if ext == ".csv":
         return parse_wigle_csv(path)
     return iter(())
+
+
+def dedupe_networks(rows):
+    """(bssid, lat, lon) rows -> ([(lat, lon), ...], n_dupes): keep each AP once (by
+    BSSID, first location kept), so an AP present in several unioned exports isn't
+    counted repeatedly in coverage or hotspots. Blank-BSSID rows are kept as unique."""
+    seen, points, dup = set(), [], 0
+    for bssid, lat, lon in rows:
+        if bssid:
+            if bssid in seen:
+                dup += 1
+                continue
+            seen.add(bssid)
+        points.append((lat, lon))
+    return points, dup
 
 
 def _is_sqlite(path):
@@ -479,6 +505,33 @@ def parse_sqlite_networks(path):
     finally:
         con.close()
     return [(float(la), float(lo)) for (la, lo) in rows]
+
+
+def run_network_counts(path, t0, t1, dlat, dlon):
+    """Distinct networks (BSSIDs) per grid cell observed within a single run's time
+    window [t0, t1] (epoch ms), from the `location` table. Unlike the whole-DB
+    `network` source, `location` logs one row PER OBSERVATION, so this dedups by BSSID
+    (each network counts once per cell) - otherwise a network logged dozens of times
+    would blow up the density. Returns {(row,col): distinct_bssid_count}. Read-only.
+    This is the per-run hotspot metric, so hotspots match the run's own coverage
+    instead of all-history."""
+    import sqlite3
+    import urllib.request
+    uri = "file:" + urllib.request.pathname2url(os.path.abspath(path)) + "?mode=ro"
+    con = sqlite3.connect(uri, uri=True)
+    try:
+        rows = con.execute(
+            "SELECT bssid, lat, lon FROM location "
+            "WHERE time BETWEEN ? AND ? AND lat BETWEEN -90 AND 90 "
+            "AND lon BETWEEN -180 AND 180 AND NOT (lat = 0 AND lon = 0)",
+            (int(t0), int(t1))).fetchall()
+    finally:
+        con.close()
+    seen = {}                                    # cell -> set of BSSIDs observed there
+    for bssid, la, lo in rows:
+        cell = cell_of(float(la), float(lo), dlat, dlon)
+        seen.setdefault(cell, set()).add(bssid)
+    return {cell: len(bssids) for cell, bssids in seen.items()}
 
 
 def _percentile(sorted_vals, pct):
@@ -1689,12 +1742,16 @@ def run(args):
                 n0 = len(raw)
                 raw.extend(parse_any(f))
                 print(f"  {os.path.basename(f)}: {len(raw) - n0:,} points")
-            # Drop invalid/null-island coords - one (0,0) fix would stretch the map to the ocean.
-            points = [(la, lo) for (la, lo) in raw
-                      if -90 <= la <= 90 and -180 <= lo <= 180 and not (la == 0 and lo == 0)]
-            dd = len(raw) - len(points)
+            # Valid coords only (one (0,0) fix would stretch the map to the ocean), then
+            # dedupe by BSSID so an AP seen across unioned exports counts once.
+            valid = [(b, la, lo) for (b, la, lo) in raw
+                     if -90 <= la <= 90 and -180 <= lo <= 180 and not (la == 0 and lo == 0)]
+            points, dup = dedupe_networks(valid)
+            dd = len(raw) - len(valid)
             if dd:
                 print(f"  dropped {dd:,} invalid/zero coordinates")
+            if dup:
+                print(f"  deduped {dup:,} duplicate AP(s) across files")
             base_dir = os.path.dirname(os.path.abspath(cover_files[0]))
             if sqlite_path:
                 print(f"reading track from {os.path.basename(sqlite_path)}...")
@@ -1731,7 +1788,15 @@ def run(args):
 
     # Hotspots: count actual NETWORKS per cell ("SSIDs captured", the WiGLE metric) - not GPS
     # fixes. KML/CSV points already ARE networks; from a SQLite backup, read the `network` table.
-    if cover_files and not (args.run or args.date):
+    if (args.run or args.date) and sqlite_path and track_fixes:
+        # per-run hotspots: distinct BSSIDs observed within THIS run's time window (from
+        # `location`), so density matches the run's coverage instead of all-history.
+        times = [t for (t, _, _) in track_fixes]
+        try:
+            net_counts = run_network_counts(sqlite_path, min(times), max(times), dlat, dlon)
+        except Exception:
+            net_counts = coverage
+    elif cover_files and not (args.run or args.date):
         net_counts = coverage
     elif sqlite_path:
         try:

@@ -195,9 +195,9 @@ Raise `--hole-threshold` → stricter, so fewer cells count as holes (more becom
 → more holes. Each cell's map popup shows its exact covered-neighbour count.
 
 **Hotspots.** A toggle-able **"Hotspots (networks)"** layer marks your densest cells with
-WiGLE-style circles — sized by how many **networks** were captured there, with the count
+WiGLE-style circles — sized by how many **distinct networks** were captured there (counted once per BSSID, so an AP that shows up in several unioned exports doesn't inflate the count), with the count
 labeled on each (click for the exact number). It counts *actual APs* — from the KML/CSV
-directly, or from the SQLite backup's `network` table (not the GPS track). By default it
+directly, or from the SQLite backup's `network` table (not the GPS track). In a `--run` / `--date` view it instead counts the distinct networks *observed on that walk* (from the backup's `location` table, within the run's time window), so the hotspots match that run's coverage rather than your whole history — the two views' numbers won't line up 1:1, which is expected. By default it
 shows your **top ~10% densest cells** (adaptive per dataset); `--hotspot N` sets an absolute
 threshold (only cells with ≥ N networks), and `--hotspot 0` turns it off.
 

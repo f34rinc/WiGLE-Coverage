@@ -778,5 +778,72 @@ class TestMenuNamespace(unittest.TestCase):
         self.assertEqual(ns.out, "map.html")
 
 
+class TestDedupeNetworks(unittest.TestCase):
+    def test_dedupe_by_bssid(self):
+        rows = [("AA", 40.0, -111.0), ("BB", 40.0, -111.0),
+                ("AA", 40.5, -111.5),                     # dup BSSID -> dropped
+                ("", 41.0, -112.0), ("", 41.0, -112.0)]   # blank -> both kept (unique)
+        points, dup = wc.dedupe_networks(rows)
+        self.assertEqual(dup, 1)
+        self.assertEqual(len(points), 4)                  # AA, BB, blank, blank
+        self.assertIn((40.0, -111.0), points)             # AA kept at its FIRST location
+        self.assertNotIn((40.5, -111.5), points)          # AA's later location dropped
+
+
+class TestParsersCarryBssid(unittest.TestCase):
+    def test_csv_yields_bssid_and_coords(self):
+        csv = ("WigleWifi-1.4,appRelease\n"
+               "MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,"
+               "CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n"
+               "aa:bb:cc:dd:ee:ff,Net,[WPA2],2026-01-01,6,-50,40.0,-111.0,0,5,WIFI\n")
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.csv")
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write(csv)
+            self.assertEqual(list(wc.parse_wigle_csv(p)),
+                             [("AA:BB:CC:DD:EE:FF", 40.0, -111.0)])   # upper-cased
+
+    def test_kml_yields_bssid_and_coords(self):
+        kml = ('<kml><Placemark><name>Net</name>'
+               '<description>Network ID: aa:bb:cc:11:22:33</description>'
+               '<Point><coordinates>-111.0,40.0,0</coordinates></Point>'
+               '</Placemark></kml>')
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.kml")
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write(kml)
+            self.assertEqual(list(wc.parse_kml(p)),
+                             [("AA:BB:CC:11:22:33", 40.0, -111.0)])
+
+
+class TestRunNetworkCounts(unittest.TestCase):
+    def _make_db(self, path):
+        import sqlite3
+        con = sqlite3.connect(path)
+        con.execute("CREATE TABLE location (bssid TEXT, lat REAL, lon REAL, time INTEGER)")
+        con.executemany(
+            "INSERT INTO location (bssid,lat,lon,time) VALUES (?,?,?,?)",
+            [("AA", 40.0, -111.0, 1100),   # in window, busy cell
+             ("AA", 40.0, -111.0, 1200),   # dup BSSID same cell -> counts once
+             ("AA", 40.0, -111.0, 1300),
+             ("BB", 40.0, -111.0, 1400),   # 2nd BSSID same cell -> cell = 2 distinct
+             ("CC", 41.5, -112.5, 1500),   # far cell -> 1 distinct
+             ("DD", 40.0, -111.0, 3000),   # OUT of window -> excluded
+             ("EE", 0.0, 0.0, 1600)])      # zero-island -> excluded
+        con.commit()
+        con.close()
+
+    def test_distinct_per_cell_within_window(self):
+        dlat, dlon = wc.meters_to_deg(50, 40.0)
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "b.sqlite")
+            self._make_db(p)
+            counts = wc.run_network_counts(p, 1000, 2000, dlat, dlon)
+        busy = wc.cell_of(40.0, -111.0, dlat, dlon)
+        self.assertEqual(counts[busy], 2)              # AA (deduped) + BB
+        self.assertEqual(sum(counts.values()), 3)      # busy(2) + CC(1); DD/EE excluded
+        self.assertEqual(len(counts), 2)               # two occupied cells
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
