@@ -77,6 +77,26 @@ coverage **and** path **and** run-slicing from that one file.
 > It's a **point-in-time snapshot** and **per-phone** — take a fresh backup for your latest
 > walks, and back up each phone separately if more than one person collects.
 
+### No backup handy? Bulk-download your uploads as CSV (WiGLE-Vault)
+
+If you can't make a fresh `.sqlite` backup — say your history is spread across months of
+uploads, or it's on a phone you no longer have — you can pull **every CSV you've uploaded to
+your WiGLE account** in one shot with the third-party
+**[WiGLE-Vault](https://github.com/Ringmast4r/WiGLE-Vault)** tool. It authenticates with a
+**read-only API token** (from <https://wigle.net/account>) and drops all your CSVs into a
+`vault/` folder; point this tool at that folder — drop it in `data/`, or pass the path — and it
+unions them for coverage like any other WiGLE CSV.
+
+> **SQLite is still the best input, though.** WiGLE-Vault gives you **CSV only**, and a WiGLE
+> CSV carries **network locations but no GPS track and no timestamps** — so you get the coverage
+> map and the holes/edges, but **not your walked path** and **not the run views**
+> (`--list-runs` / `--run` / `--date`). Reach for WiGLE-Vault when a `.sqlite` "Database Backup"
+> isn't available; when one *is*, prefer it — a single backup delivers coverage **and** path
+> **and** run-slicing (see above).
+
+> *WiGLE-Vault is an independent third-party project, not affiliated with this tool or with
+> WiGLE. You supply your own API token, and it downloads only your own data.*
+
 ## Use it
 
 <p align="center">
