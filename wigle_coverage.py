@@ -1281,7 +1281,7 @@ __LEAFLET_JS__
   .targets .tsort{display:block;margin:4px 0 2px;font-size:11px;color:#555;cursor:pointer;user-select:none}
   .targets .tsort input{vertical-align:middle;margin:0 4px 0 0}
   .targets .tdone{float:right;border:1px solid #16a34a;background:#fff;color:#16a34a;border-radius:4px;
-                  font:inherit;font-size:11px;line-height:1;cursor:pointer;padding:1px 5px;margin-left:6px}
+                  font:inherit;font-size:11px;line-height:1;cursor:pointer;padding:1px 5px;margin:0 8px 0 6px}
   .targets .tdone:hover{background:#16a34a;color:#fff}
   .targets .treset{border:1px solid #bbb;background:#fff;color:#555;border-radius:4px;font:inherit;
                    font-size:12px;line-height:1;cursor:pointer;padding:1px 7px;margin:0 0 2px}
@@ -1290,7 +1290,7 @@ __LEAFLET_JS__
   .leaflet-popup-content .ptargets li{margin:2px 0;line-height:1.3}
   .leaflet-popup-content b{color:#0b525b}
   .leaflet-popup-content .notgt{color:#777}
-  .leaflet-popup-content .pcov{display:inline-block;margin-top:7px;border:1px solid #16a34a;background:#fff;
+  .leaflet-popup-content .pcov{display:inline-block;margin:8px 0 0 8px;border:1px solid #16a34a;background:#fff;
      color:#16a34a;border-radius:4px;font:inherit;font-size:12px;cursor:pointer;padding:2px 9px}
   .leaflet-popup-content .pcov:hover{background:#16a34a;color:#fff}
   .hslabel{background:none;border:none;box-shadow:none;padding:0;margin:0;color:#fff;
