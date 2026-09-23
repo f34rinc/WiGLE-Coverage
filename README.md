@@ -244,8 +244,7 @@ The keyless Esri basemaps work out of the box. If you want a clean OSM-based
 2. Copy `map_key.txt.example` → `map_key.txt` and paste your key on a line.
 
 An **"OSM smooth (Stadia)"** option then appears in the layer switcher (and becomes the
-default). **No key → the option simply isn't shown.** `map_key.txt` is git-ignored — it's
-*your* key, never committed; you don't use anyone else's, and no one uses yours.
+default). **No key → the option simply isn't shown.**
 
 ### Self-contained map (no CDN)
 
