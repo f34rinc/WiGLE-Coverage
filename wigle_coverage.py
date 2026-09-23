@@ -1290,6 +1290,9 @@ __LEAFLET_JS__
   .leaflet-popup-content .ptargets li{margin:2px 0;line-height:1.3}
   .leaflet-popup-content b{color:#0b525b}
   .leaflet-popup-content .notgt{color:#777}
+  .leaflet-popup-content .pcov{display:inline-block;margin-top:7px;border:1px solid #16a34a;background:#fff;
+     color:#16a34a;border-radius:4px;font:inherit;font-size:12px;cursor:pointer;padding:2px 9px}
+  .leaflet-popup-content .pcov:hover{background:#16a34a;color:#fff}
   .hslabel{background:none;border:none;box-shadow:none;padding:0;margin:0;color:#fff;
            font-weight:700;font-size:11px;text-shadow:0 0 2px #000,0 0 2px #000,0 0 1px #000}
   .hslabel::before{display:none}
@@ -1357,24 +1360,32 @@ function escapeHtml(s){ return String(s).replace(/[&<>"]/g,
   c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 const RC = {hole:'#dc2626', edge:'#f59e0b'};
 const targetHoles = [];   // holes that have named businesses -> feeds the target panel
+const holeReg = {};       // id -> {layer, center, covered} for EVERY hole (cover/reset, incl. no-POI)
+let holeId = 0;
 D.recs.forEach(([r,c,label,nb,pois,more])=>{
   const b=bounds(r,c), ct=center(b);
   more = more||0;
-  let html='<b>'+(label==='hole'?'Hole (skipped)':'Edge (frontier)')+'</b><br>'
+  const isHole = (label==='hole');
+  const id = isHole ? holeId++ : -1;
+  let html='<b>'+(isHole?'Hole (skipped)':'Edge (frontier)')+'</b><br>'
      +nb+' of 8 neighbours covered<br>'+maplink(ct[0],ct[1])+navlinks(ct[0],ct[1]);
   if (pois && pois.length){
     html += '<br><b>targets:</b><ol class="ptargets">'
           + pois.map(n => '<li>'+escapeHtml(n)+'</li>').join('') + '</ol>';
     if (more) html += '<i>+'+more+' more</i>';
-  } else if (label==='hole'){                        // a skipped cell we searched, but no businesses mapped
+  } else if (isHole){                                // a skipped cell we searched, but no businesses mapped
     html += '<br><i class="notgt">No named targets mapped here.</i>';
   }
+  if (isHole)                                        // every hole (POI or not) is checkable from its popup
+    html += '<button class="pcov" onclick="coverHole('+id+')" title="Mark this cell covered: dims it green and drops it from the list (the panel reset button restores it)">&#10003; covered</button>';
   const rect = L.rectangle(b, {color:RC[label], weight:2, fillColor:RC[label], fillOpacity:.35})
    .bindPopup(html, {maxWidth:340}).addTo(map);
-  if (label==='hole' && pois && pois.length){
-    const entry = {center:ct, layer:rect, names:pois, more:more, id:targetHoles.length};
-    targetHoles.push(entry);
-    rect.on('click', ()=> bumpTarget(entry.id));   // clicking the hole cell bumps its panel row
+  if (isHole){
+    holeReg[id] = {layer:rect, center:ct, covered:false};
+    if (pois && pois.length){
+      targetHoles.push({center:ct, layer:rect, names:pois, more:more, id:id});
+      rect.on('click', ()=> bumpTarget(id));         // clicking a business-hole cell re-sorts the panel
+    }
   }
 });
 
@@ -1402,23 +1413,26 @@ function bumpTarget(id){
             clearTimeout(top._bt); top._bt = setTimeout(()=> top.classList.remove('tbump'), 1700); }
 }
 
-// checking a target off ("covered") hides its row + dims its cell green; reset restores all
+// checking a cell off ("covered") dims it green + hides any panel row; reset restores every hole.
+// coverHole works for ANY hole by id - the panel button and the popup button both call it.
 function _tcount(){
   const c=document.querySelector('.targets .tcount'), ul=document.querySelector('.targets .tlist');
   if(c&&ul) c.textContent=[...ul.querySelectorAll('li[data-id]')].filter(x=>x.style.display!=='none').length;
 }
-function markCovered(h, li){
-  h.covered=true;
-  if(h.layer){ h.layer.closePopup(); h.layer.setStyle({color:'#16a34a', fillColor:'#16a34a', fillOpacity:.15, weight:1}); }
-  li.style.display='none';                            // hide (not remove) so reset can restore it
+function coverHole(id){
+  const reg=holeReg[id]; if(!reg || reg.covered) return;
+  reg.covered=true;
+  reg.layer.closePopup();
+  reg.layer.setStyle({color:'#16a34a', fillColor:'#16a34a', fillOpacity:.15, weight:1});
+  const li=document.querySelector('.targets li[data-id="'+id+'"]'); if(li) li.style.display='none';  // panel row, if any
   _tcount();
 }
 function resetCovered(){
-  targetHoles.forEach(h=>{ if(!h.covered) return;
-    h.covered=false;
-    if(h.layer) h.layer.setStyle({color:'#dc2626', fillColor:'#dc2626', fillOpacity:.35, weight:2});
-    const li=document.querySelector('.targets li[data-id="'+h.id+'"]'); if(li) li.style.display='';
-  });
+  for(const id in holeReg){ const reg=holeReg[id]; if(!reg.covered) continue;
+    reg.covered=false;
+    reg.layer.setStyle({color:'#dc2626', fillColor:'#dc2626', fillOpacity:.35, weight:2});
+    const li=document.querySelector('.targets li[data-id="'+id+'"]'); if(li) li.style.display='';
+  }
   _tcount();
 }
 
@@ -1451,7 +1465,7 @@ if (targetHoles.length){
       if(ev.target.closest('a.nav')) return;         // let Navigate links open maps, don't fly
       const li = ev.target.closest('li[data-id]'); if(!li) return;
       const h = targetHoles.find(x=> x.id === +li.dataset.id); if(!h) return;
-      if(ev.target.closest('.tdone')){ markCovered(h, li); return; }   // check off -> drop row + dim cell
+      if(ev.target.closest('.tdone')){ coverHole(h.id); return; }      // check off -> dim cell + hide row
       map.flyTo(h.center, Math.max(map.getZoom(), 17));
       h.layer.openPopup();
     });

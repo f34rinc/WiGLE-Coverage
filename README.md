@@ -279,7 +279,7 @@ You get the same list **four ways**, so you can plan at the desk and work off it
 - in an in-map **"Targets" panel** (top-left), most-loaded holes first — **click a row** to fly
   the map to that hole and open its popup; **click a hole cell on the map** to re-sort the panel
   *nearest-first from that cell* (a toggle up top turns this on/off), handy for planning the hop
-  to the next-closest gap; and **check a target off** (✓) to hide it as you cover ground — the
+  to the next-closest gap; and **check a target off** (✓) to hide it as you cover ground (every hole's popup has the same check-off button, so empty gaps not in this list are coverable too) — the
   **reset** button (↺) brings everything back (it's a temporary in-session planning overlay, not
   saved to disk);
 - in a standalone **`*_targets.html`** — a self-contained, **offline, printable field sheet**.

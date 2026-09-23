@@ -841,10 +841,12 @@ class TestMapInteractions(unittest.TestCase):
     def test_panel_controls_present(self):
         html = self._html()
         self.assertIn("tsortck", html)                  # nearest-sort on/off toggle
-        self.assertIn("function markCovered", html)     # check a target off
+        self.assertIn("function coverHole", html)       # unified check-off (panel + popup)
         self.assertIn("function resetCovered", html)    # restore all
+        self.assertIn("holeReg", html)                  # every-hole registry (incl. no-POI)
         self.assertIn("treset", html)                   # reset button
         self.assertIn("tdone", html)                    # per-row check-off button
+        self.assertIn("pcov", html)                     # popup 'covered' button (any hole)
 
 
 class TestRunNetworkCounts(unittest.TestCase):
