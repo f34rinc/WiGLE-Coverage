@@ -85,6 +85,7 @@ import random
 import hashlib
 import argparse
 import datetime
+import textwrap
 import pathlib
 import webbrowser
 from html import escape as _esc
@@ -1904,10 +1905,20 @@ def _menu_status(st):
     print()
     print(f" {C.b}{C.cyan}WiGLE coverage{r}")
     print(_rule("="))
+    hs = st.get("hotspot")
+    hs_lbl = "auto" if hs is None else ("off" if hs == 0 else str(hs))
+    mp = st.get("max_pois", MAX_POIS_TOTAL)
+    ph = st.get("max_pois_per_hole", MAX_POIS_PER_HOLE)
+    mp_lbl = "all" if mp == 0 else str(mp)
+    ph_lbl = "all" if ph == 0 else str(ph)
+    armed = [k for k in ("pois", "overture") if st.get("refresh_" + k)]
+    refresh_lbl = f"  |  refresh armed: {C.yellow}{'+'.join(armed)}{r}" if armed else ""
     print(f"  {b}data {r} | {st['data']}")
     print(f"  {b}found{r} | {found}")
-    print(f"  {b}grid {r} | cell {g}{st['cell_size']:.0f} m{r} | min-obs {st['min_obs']} | hole {st['hole_threshold']}")
-    print(f"  {b}mode {r} | {g}{mode}{r}  |  pois {'on' if st.get('pois') else 'off'}")
+    print(f"  {b}grid {r} | cell {g}{st['cell_size']:.0f} m{r} | min-obs {st['min_obs']} | hole {st['hole_threshold']} | hotspot {g}{hs_lbl}{r}")
+    print(f"  {b}gaps {r} | run {st['run_gap']} min | track {st['track_gap']} min")
+    print(f"  {b}mode {r} | {g}{mode}{r}")
+    print(f"  {b}pois {r} | {'on' if st.get('pois') else 'off'} | {mp_lbl} total, {ph_lbl}/hole{refresh_lbl}")
     if src == "osm":
         setup = f"{g}zero-setup{r}"
     elif _load_duckdb() is not None:
@@ -1915,6 +1926,13 @@ def _menu_status(st):
     else:
         setup = f"{C.yellow}needs duckdb: pip install duckdb{r}"
     print(f"  {b}{m}source{r} | {m}{b}{src.upper()}{r} | where business names come from ({setup})")
+    extras = []
+    if st.get("track"):
+        extras.append(f"track: {g}{os.path.basename(st['track'])}{r}")
+    if st.get("out"):
+        extras.append(f"out: {g}{os.path.basename(st['out'])}{r}")
+    if extras:
+        print(f"  {b}files{r} | " + " | ".join(extras))
 
 
 def _menu_help():
@@ -1923,16 +1941,83 @@ def _menu_help():
     print(f"  {y}all{r}            whole history / union   {C.dim}(default){r}")
     print(f"  {y}runs{r}           list the sessions in the backup")
     print(f"  {y}run{r} N          just run N              {y}date{r} YYYY-MM-DD   just that date")
-    print(_rule(label="tune"))
-    print(f"  {y}cell{r} N         grid size (m)   {y}min{r} N   min obs   {y}hole{r} N   hole threshold")
+    print(_rule(label="tune the grid + track"))
+    print(f"  {y}cell{r} N  grid m   {y}min{r} N  min obs   {y}hole{r} N  hole thresh   {y}hotspot{r} N  (0=off, auto)")
+    print(f"  {y}rungap{r} N       session split (min)     {y}trackgap{r} N   path split (min)")
+    print(_rule(label="data + output"))
     print(f"  {y}data{r} <path>    read a different folder")
-    print(f"  {y}pois{r}           toggle naming businesses in holes")
-    print(_rule(label="POI source - where the business names come from"))
-    print(f"  {m}{C.b}source{r}         switch  {m}{C.b}overture{r} (default; better dataset)  "
-          f"<->  {m}{C.b}osm{r} (zero-setup)")
+    print(f"  {y}track{r} <path>   add a track (.gpx/.sqlite)   {y}out{r} <path>   output file")
+    print(_rule(label="POI - business names in holes"))
+    print(f"  {m}{C.b}source{r}  {m}overture{r}<->{m}osm{r}   {y}pois{r} toggle   {y}max{r} N total   {y}perhole{r} N per hole")
+    print(f"  {y}refresh{r}        re-query POIs next build   {y}refresh overture{r}   re-pull snapshot")
     print(_rule(label="go"))
     print(f"  {y}go{r} (or Enter)  build + open the map    {y}help{r}   commands    {y}q{r}   quit")
+    print(f"  {y}??{r} (or {y}man{r})     full per-flag reference   {y}help{r} <cmd>   detail for one")
     print(_rule("="))
+
+
+# Longer, per-flag reference shown by '??' / 'man' (or 'help <cmd>' for one entry).
+_MENU_GUIDE = [
+    ("view", "which WiGLE run to map", [
+        ("all", "Whole history: the union of every export in the data folder (default)."),
+        ("runs", "List the sessions (runs) in the SQLite backup, then pick one with 'run N'."),
+        ("run N", "Map only session N from the backup (numbers come from 'runs')."),
+        ("date YYYY-MM-DD", "Map only the fixes logged on that local date."),
+    ]),
+    ("grid", "grid + hotspots", [
+        ("cell N", "Grid cell edge in metres (~half a block). Below ~25 m you're just mapping GPS scatter. Default 50."),
+        ("min N", "How many networks a cell needs before it counts as 'covered' - filters stray fixes. Default 2."),
+        ("hole N", "Of a cell's 8 neighbours, how many must be covered for it to rank as a 'hole' (a street you skipped) vs an 'edge' (the frontier). Higher = stricter, so fewer holes. Default 5."),
+        ("hotspot N", "Density circles on cells with at least N networks. 0 turns them off; 'auto' marks the top ~10% densest, adaptive per dataset (the default)."),
+    ]),
+    ("track", "runs + track segmentation", [
+        ("rungap N", "Minutes of gap between fixes that starts a new run, for the run/date views. Default 30."),
+        ("trackgap N", "Minutes between GPS fixes that break the drawn path into a new segment, so separate walks don't join with a straight line. Default 5."),
+    ]),
+    ("io", "data + output", [
+        ("data <path>", "Folder to read (KML/CSV exports plus .sqlite backups). Default ./data."),
+        ("track <path>", "Add your walked path from a .gpx or .sqlite backup; a .gpx on its own renders a track-only map, and a .sqlite also unlocks the run/date views. Leave blank to clear it."),
+        ("out <path>", "Where to write the .html map. Default: beside the input. Blank = auto-name."),
+    ]),
+    ("poi", "business names in holes (POIs)", [
+        ("source", "Toggle where business names come from: overture (richer, needs 'pip install duckdb') or osm (zero-setup, thinner coverage)."),
+        ("pois", "Toggle the business lookup inside each hole on or off."),
+        ("max N", "Total business budget across all holes - keeps the richest holes whole and drops the sparsest past the budget. 0 = no cap. Default 100."),
+        ("perhole N", "Most businesses shown per hole; the rest collapse to a '+N more' note. 0 = no cap. Default 4."),
+        ("refresh", "Ignore the cached POI results and re-query on the next build. 'refresh overture' instead re-pulls the local Overture snapshot."),
+    ]),
+    ("go", "build + quit", [
+        ("go / Enter", "Build the map with the current settings and open it in the browser."),
+        ("help / ?", "Redraw the compact menu panel. 'help <cmd>' shows the detail for one command."),
+        ("?? / man", "This full per-flag reference."),
+        ("q", "Quit the menu."),
+    ]),
+]
+
+
+def _menu_help_detail(topic=None):
+    """Full per-flag reference (command '??'/'man'), or one entry ('help <cmd>')."""
+    y, r = C.yellow, C.reset
+    _clear()
+    print(f"\n {C.b}{C.cyan}WiGLE coverage - command reference{r}")
+    t = topic.lower() if topic else None
+    shown = False
+    for key, title, entries in _MENU_GUIDE:
+        rows = [(n, desc) for (n, desc) in entries
+                if t is None or t == key or n.split()[0].lower() == t]
+        if not rows:
+            continue
+        shown = True
+        print(_rule(label=title))
+        for name, desc in rows:
+            print(f"  {y}{name}{r}")
+            for ln in textwrap.wrap(desc, 72):
+                print(f"      {ln}")
+    if not shown:
+        print(f"\n  no command matches '{topic}'. Type {y}??{r} for the whole reference.")
+        return
+    print(_rule("="))
+    print(f"  {C.dim}type a command, or {r}{y}help{r}{C.dim} to return to the menu panel{r}")
 
 
 def _clear():
@@ -1959,22 +2044,31 @@ def _redraw(st, changed=None, note=None):
 
 def _menu_namespace(st, list_runs=False):
     return argparse.Namespace(
-        paths=[st["data"]], track=None, data=None,
+        paths=[st["data"]], track=st.get("track"), data=None,
         cell_size=st["cell_size"], min_obs=st["min_obs"], hole_threshold=st["hole_threshold"],
         run_gap=st["run_gap"], track_gap=st["track_gap"], list_runs=list_runs,
         run=st["run"] if st["mode"] == "run" else None,
         date=st["date"] if st["mode"] == "date" else None,
         pois=st.get("pois", True), poi_source=st.get("poi_source", "overture"),
-        overture_confidence=OVERTURE_MIN_CONFIDENCE, overture_release=OVERTURE_RELEASE, hotspot=None,
-        max_pois_per_hole=MAX_POIS_PER_HOLE, max_pois=MAX_POIS_TOTAL,
-        refresh_pois=False, refresh_overture=False, out=None, no_open=True, menu=False)
+        overture_confidence=OVERTURE_MIN_CONFIDENCE, overture_release=OVERTURE_RELEASE,
+        hotspot=st.get("hotspot"),
+        max_pois_per_hole=st.get("max_pois_per_hole", MAX_POIS_PER_HOLE),
+        max_pois=st.get("max_pois", MAX_POIS_TOTAL),
+        refresh_pois=st.get("refresh_pois", False),
+        refresh_overture=st.get("refresh_overture", False),
+        out=st.get("out"), no_open=True, menu=False)
 
 
 def interactive_menu(args):
     st = {"data": args.data or DATA_DIR, "cell_size": args.cell_size, "min_obs": args.min_obs,
           "hole_threshold": args.hole_threshold, "run_gap": args.run_gap,
           "track_gap": args.track_gap, "mode": "all", "run": None, "date": None,
-          "pois": getattr(args, "pois", True), "poi_source": getattr(args, "poi_source", "overture")}
+          "pois": getattr(args, "pois", True), "poi_source": getattr(args, "poi_source", "overture"),
+          "hotspot": getattr(args, "hotspot", None),
+          "max_pois": getattr(args, "max_pois", MAX_POIS_TOTAL),
+          "max_pois_per_hole": getattr(args, "max_pois_per_hole", MAX_POIS_PER_HOLE),
+          "refresh_pois": False, "refresh_overture": False,
+          "track": getattr(args, "track", None), "out": getattr(args, "out", None)}
     _redraw(st)
     while True:
         try:
@@ -1989,6 +2083,7 @@ def interactive_menu(args):
                 break
             elif cmd in ("", "go", "map", "open"):
                 out = run(_menu_namespace(st))
+                st["refresh_pois"] = st["refresh_overture"] = False   # one-shot, consumed by the build
                 if out:
                     try:
                         webbrowser.open(pathlib.Path(out).resolve().as_uri())
@@ -2020,6 +2115,38 @@ def interactive_menu(args):
             elif cmd == "pois":
                 st["pois"] = not st.get("pois", False)
                 _redraw(st, changed=f"pois -> {'on' if st['pois'] else 'off'}")
+            elif cmd == "hotspot":
+                if arg in ("", "auto"):
+                    st["hotspot"], lbl = None, "auto (adaptive)"
+                else:
+                    st["hotspot"] = int(arg)
+                    lbl = "off" if st["hotspot"] == 0 else str(st["hotspot"])
+                _redraw(st, changed=f"hotspot -> {lbl}")
+            elif cmd in ("max", "maxpois") and arg:
+                st["max_pois"] = int(arg)
+                _redraw(st, changed=f"max-pois -> {'all' if st['max_pois'] == 0 else st['max_pois']}")
+            elif cmd in ("perhole", "maxperhole") and arg:
+                st["max_pois_per_hole"] = int(arg)
+                _redraw(st, changed=f"per-hole -> {'all' if st['max_pois_per_hole'] == 0 else st['max_pois_per_hole']}")
+            elif cmd == "rungap" and arg:
+                st["run_gap"] = int(arg)
+                _redraw(st, changed=f"run-gap -> {st['run_gap']} min")
+            elif cmd == "trackgap" and arg:
+                st["track_gap"] = int(arg)
+                _redraw(st, changed=f"track-gap -> {st['track_gap']} min")
+            elif cmd in ("track", "gpx"):
+                st["track"] = arg or None
+                _redraw(st, changed=(f"track -> {os.path.basename(arg)}" if arg else "track cleared"))
+            elif cmd == "out":
+                st["out"] = arg or None
+                _redraw(st, changed=(f"out -> {os.path.basename(arg)}" if arg else "out cleared (auto)"))
+            elif cmd == "refresh":
+                if arg == "overture":
+                    st["refresh_overture"] = True
+                    _redraw(st, changed="refresh overture armed (next build)")
+                else:
+                    st["refresh_pois"] = True
+                    _redraw(st, changed="refresh POIs armed (next build)")
             elif cmd in ("source", "poi", "poi-source"):
                 st["poi_source"] = "osm" if st.get("poi_source", "overture") == "overture" else "overture"
                 note = None
@@ -2028,7 +2155,12 @@ def interactive_menu(args):
                             f"{C.b}pip install duckdb{C.reset} (falls back to OSM until then)")
                 _redraw(st, changed=f"source -> {st['poi_source']}", note=note)
             elif cmd in ("help", "h", "?"):
-                _redraw(st)
+                if arg:
+                    _menu_help_detail(arg)     # detail for one command
+                else:
+                    _redraw(st)
+            elif cmd in ("??", "man", "guide", "reference"):
+                _menu_help_detail()            # full per-flag reference
             else:
                 print("  unknown command - type 'help'")
         except ValueError:

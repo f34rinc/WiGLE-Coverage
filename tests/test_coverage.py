@@ -745,5 +745,38 @@ class TestGpxTrack(unittest.TestCase):
         self.assertNotIn('"fit": [[0, 0]', html)       # fit is the track, not degenerate (0,0)
 
 
+class TestMenuNamespace(unittest.TestCase):
+    """The interactive menu must pass its tunables through to run(), not silently
+    fall back to hardcoded defaults (the gap that motivated exposing them)."""
+    BASE = {"data": "d", "cell_size": 50.0, "min_obs": 2, "hole_threshold": 5,
+            "run_gap": 30, "track_gap": 5, "mode": "all", "run": None, "date": None,
+            "pois": True, "poi_source": "overture"}
+
+    def test_defaults_when_unset(self):
+        ns = wc._menu_namespace(dict(self.BASE))
+        self.assertIsNone(ns.hotspot)
+        self.assertIsNone(ns.track)
+        self.assertIsNone(ns.out)
+        self.assertFalse(ns.refresh_pois)
+        self.assertFalse(ns.refresh_overture)
+        self.assertEqual(ns.max_pois, wc.MAX_POIS_TOTAL)
+        self.assertEqual(ns.max_pois_per_hole, wc.MAX_POIS_PER_HOLE)
+
+    def test_tunables_pass_through(self):
+        st = dict(self.BASE, hotspot=25, max_pois=0, max_pois_per_hole=6,
+                  run_gap=45, track_gap=8, refresh_pois=True, refresh_overture=True,
+                  track="run.gpx", out="map.html")
+        ns = wc._menu_namespace(st)
+        self.assertEqual(ns.hotspot, 25)
+        self.assertEqual(ns.max_pois, 0)              # 0 = no cap, must survive
+        self.assertEqual(ns.max_pois_per_hole, 6)
+        self.assertEqual(ns.run_gap, 45)
+        self.assertEqual(ns.track_gap, 8)
+        self.assertTrue(ns.refresh_pois)
+        self.assertTrue(ns.refresh_overture)
+        self.assertEqual(ns.track, "run.gpx")
+        self.assertEqual(ns.out, "map.html")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

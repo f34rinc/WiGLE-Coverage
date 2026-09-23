@@ -33,12 +33,14 @@ the script, then run it with **no arguments** for an interactive menu:
 ```
 python wigle_coverage.py
 #  data   | ./data   (backup: WiGLE Database Backup.sqlite)
-#  grid   | cell 50 m | min-obs 2 | hole 5
-#  mode   | entire-DB / union   |  pois on
-#  source | Overture (where the business names come from; OSM fallback w/o duckdb)
-#  > runs         list your sessions         > run 3     map just that walk
-#  > source       osm <-> overture           > cell 75   tweak the grid
-#  > go           build + open the map
+#  grid   | cell 50 m | min-obs 2 | hole 5 | hotspot auto
+#  gaps   | run 30 min | track 5 min
+#  mode   | entire-DB / union
+#  pois   | on | 100 total, 4/hole
+#  source | OVERTURE (where the business names come from; OSM fallback w/o duckdb)
+#  > runs      list sessions   > run 3   map one walk    > cell 75      tune the grid
+#  > hotspot 0  circles off     > max 50  fewer targets   > track x.gpx   add a path
+#  > ??        full per-flag reference      > go          build + open the map
 ```
 
 Out of the box you get **coverage + the holes/edges to fill next**, your walked **track**,
@@ -101,15 +103,18 @@ unions them for coverage like any other WiGLE CSV.
 
 <p align="center">
   <img src="docs/terminal-menu.svg" width="820"
-       alt="The interactive terminal menu: a status panel (data, found, grid, mode, source) above the command list — view / tune / POI source / go.">
+       alt="The interactive terminal menu: a status panel (data, found, grid, gaps, mode, pois, source) above the command list — view / grid+track / data+output / POI / go, plus a ?? full per-flag reference.">
 </p>
 
 **Terminal interface:** run it with **no arguments** — or add **`-i`** / **`--menu`** — to drop
 into an interactive menu. It reads your `./data` folder, shows the current settings as a panel,
 and lets you set things up by typing short commands: pick a **view** (`runs`, `run 3`,
-`date 2026-09-15`), tune the **grid** (`cell 75`, `min 2`, `hole 5`), toggle **`pois`** or switch
-the POI **`source`**, then **`go`** (or just Enter) to build and open the map. Each change clears
-and redraws the panel so you always see the live state; **`help`** lists everything, **`q`** quits.
+`date 2026-09-15`); tune the **grid** (`cell 75`, `min 2`, `hole 5`, `hotspot 0`) and the
+**run/track gaps** (`rungap`, `trackgap`); shape the **POI hit-list** (`pois`, `source`, `max`,
+`perhole`, `refresh`); or point it at a **track / output file** (`track x.gpx`, `out map.html`) —
+then **`go`** (or just Enter) to build and open the map. Each change clears and redraws the panel
+so you always see the live state. **`help`** shows the compact command list, **`??`** (or `man`) a
+full per-flag reference — **`help <cmd>`** the detail for just one — and **`q`** quits.
 
 **Drag-and-drop (Windows):** drop one or more `.kml` / WiGLE `.csv` files — or the
 whole `WiGLE data` folder — onto `wigle_coverage.py`. It unions everything, builds
