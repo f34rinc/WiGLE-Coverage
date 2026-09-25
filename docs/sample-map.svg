@@ -217,7 +217,7 @@
 <rect x="504.8" y="426.3" width="24.2" height="24.2" fill="#2f9fbf" fill-opacity="0.44" stroke="#2f9fbf" stroke-opacity="0.85" stroke-width="0.9"/>
 <rect x="210.0" y="190.5" width="24.2" height="24.2" fill="#2f9fbf" fill-opacity="0.44" stroke="#2f9fbf" stroke-opacity="0.85" stroke-width="0.9"/>
 <rect x="416.3" y="426.3" width="24.2" height="24.2" fill="#2f9fbf" fill-opacity="0.44" stroke="#2f9fbf" stroke-opacity="0.85" stroke-width="0.9"/>
-<polyline points="104,438 576,438 576,438 576,321 576,321 163,321 163,321 163,203 163,203 399,203 399,203 399,114 487,114 487,203 487,203 576,203" fill="none" stroke="#6f42c1" stroke-width="2.6" stroke-opacity="0.9" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="104,438 180,441 255,435 330,440 405,436 480,439 540,437 576,438 573,405 578,375 574,345 576,321 500,324 420,318 340,322 260,319 200,323 163,321 160,290 166,255 162,225 163,203 230,206 290,200 340,204 399,203 396,175 402,150 398,130 399,114 430,117 460,112 487,114 484,140 490,165 486,185 487,203 520,206 550,201 576,203" fill="none" stroke="#6f42c1" stroke-width="2.6" stroke-opacity="0.9" stroke-linejoin="round" stroke-linecap="round"/>
 <circle cx="576" cy="321" r="26" fill="#bd0026" fill-opacity="0.4" stroke="#bd0026" stroke-opacity="0.9" stroke-width="1.5"/>
 <text x="576" y="325" text-anchor="middle" font-size="10.5" font-weight="700" fill="#7a1207">217</text>
 <circle cx="163" cy="203" r="21" fill="#f03b20" fill-opacity="0.4" stroke="#f03b20" stroke-opacity="0.9" stroke-width="1.5"/>
@@ -239,29 +239,40 @@
 <text x="26" y="31" text-anchor="middle" font-size="16" fill="#33403a">+</text>
 <rect x="12" y="40" width="28" height="28" rx="5" fill="#ffffff" stroke="#bfc6be"/>
 <text x="26" y="59" text-anchor="middle" font-size="16" fill="#33403a">−</text>
-<rect x="13.5" y="82.5" width="206" height="214" rx="7" fill="#000" fill-opacity="0.12"/>
-<rect x="12" y="80" width="206" height="214" rx="7" fill="#ffffff" fill-opacity="0.97" stroke="#c9cfc7"/>
-<text x="24" y="102" font-size="13" font-weight="700" fill="#1f2a33">Targets <tspan fill="#5b6b6e" font-weight="400">· 8 holes</tspan></text>
-<line x1="22" y1="110" x2="208" y2="110" stroke="#e4e8e1"/>
-<rect x="24" y="117" width="20" height="18" rx="4" fill="#e23b2a"/>
-<text x="34" y="130.5" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">4</text>
-<text x="52" y="130.5" font-size="12.5" fill="#24303a">Oak Street</text>
-<rect x="24" y="141" width="20" height="18" rx="4" fill="#e8590c"/>
-<text x="34" y="154.5" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">3</text>
-<text x="52" y="154.5" font-size="12.5" fill="#24303a">Maple Avenue</text>
-<rect x="24" y="165" width="20" height="18" rx="4" fill="#e8590c"/>
-<text x="34" y="178.5" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">3</text>
-<text x="52" y="178.5" font-size="12.5" fill="#24303a">2nd Street</text>
-<rect x="24" y="189" width="20" height="18" rx="4" fill="#f0a020"/>
-<text x="34" y="202.5" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">2</text>
-<text x="52" y="202.5" font-size="12.5" fill="#24303a">Elm Street</text>
-<rect x="24" y="213" width="20" height="18" rx="4" fill="#f0a020"/>
-<text x="34" y="226.5" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">2</text>
-<text x="52" y="226.5" font-size="12.5" fill="#24303a">Park Avenue</text>
-<rect x="24" y="237" width="20" height="18" rx="4" fill="#f0a020"/>
-<text x="34" y="250.5" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">2</text>
-<text x="52" y="250.5" font-size="12.5" fill="#24303a">Cedar Lane</text>
-<text x="24" y="285" font-size="11.5" fill="#5b6b6e">click a row to fly there</text>
+<rect x="13.5" y="82.5" width="210" height="258" rx="7" fill="#000" fill-opacity="0.12"/>
+<rect x="12" y="80" width="210" height="258" rx="7" fill="#ffffff" fill-opacity="0.97" stroke="#c9cfc7"/>
+<circle cx="21" cy="97" r="5.5" fill="none" stroke="#e23b2a" stroke-width="1.6"/>
+<circle cx="21" cy="97" r="1.8" fill="#e23b2a"/>
+<text x="32" y="101" font-size="13" font-weight="700" fill="#1f2a33">Targets (8)</text>
+<text x="207" y="101" text-anchor="end" font-size="15" fill="#5b6b6e">&#8211;</text>
+<text x="24" y="118" font-size="11.5" fill="#0b6b78">open printable list &#8599;</text>
+<line x1="22" y1="125" x2="210" y2="125" stroke="#e4e8e1"/>
+<rect x="24" y="131" width="11" height="11" rx="3" fill="#2f9fbf"/>
+<path d="M26.5,136.5 l2.2,2.4 l4.3,-5" fill="none" stroke="#fff" stroke-width="1.5"/>
+<text x="41" y="140.5" font-size="11" fill="#5b6b6e">click a cell &#8594; sort by nearest</text>
+<text x="207" y="140.5" text-anchor="end" font-size="12" fill="#8a938c">&#8634;</text>
+<line x1="22" y1="148" x2="210" y2="148" stroke="#e4e8e1"/>
+<rect x="24" y="155" width="20" height="17" rx="4" fill="#e23b2a"/>
+<text x="34" y="167.5" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">4</text>
+<text x="50" y="167.5" font-size="12.5" fill="#24303a">targets</text>
+<rect x="169" y="155" width="30" height="17" rx="4" fill="#ffffff" stroke="#16a34a"/>
+<text x="184" y="167.5" text-anchor="middle" font-size="11" font-weight="700" fill="#16a34a">&#10003;</text>
+<text x="40" y="186" font-size="12" fill="#24303a">Corner Bakery</text>
+<text x="40" y="201" font-size="12" fill="#24303a">City Pharmacy</text>
+<text x="40" y="216" font-size="12" fill="#24303a">The Old Anchor Pub</text>
+<text x="40" y="231" font-size="12" fill="#24303a">Green Grocer</text>
+<text x="40" y="247" font-size="11" fill="#0b6b78">Pin &#183; Directions</text>
+<line x1="22" y1="255" x2="210" y2="255" stroke="#e4e8e1"/>
+<rect x="24" y="262" width="20" height="17" rx="4" fill="#e23b2a"/>
+<text x="34" y="274.5" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">3</text>
+<text x="50" y="274.5" font-size="12.5" fill="#24303a">targets</text>
+<rect x="169" y="262" width="30" height="17" rx="4" fill="#ffffff" stroke="#16a34a"/>
+<text x="184" y="274.5" text-anchor="middle" font-size="11" font-weight="700" fill="#16a34a">&#10003;</text>
+<text x="40" y="293" font-size="12" fill="#24303a">Padaria Central</text>
+<text x="40" y="308" font-size="12" fill="#24303a">Speedy Auto Parts</text>
+<text x="40" y="323" font-size="11" font-style="italic" fill="#777">+1 more</text>
+<rect x="204" y="155" width="3" height="168" rx="1.5" fill="#e0e5df"/>
+<rect x="204" y="155" width="3" height="58" rx="1.5" fill="#aab3ab"/>
 <rect x="705.5" y="14.5" width="184" height="172" rx="7" fill="#000" fill-opacity="0.12"/>
 <rect x="704" y="12" width="184" height="172" rx="7" fill="#ffffff" fill-opacity="0.97" stroke="#c9cfc7"/>
 <text x="716" y="33" font-size="13" font-weight="700" fill="#1f2a33">Layers</text>
@@ -287,16 +298,21 @@
 <path d="M718,146 l2.5,3 l5,-6" fill="none" stroke="#fff" stroke-width="1.6"/>
 <circle cx="747" cy="149" r="7" fill="#f03b20" fill-opacity="0.5" stroke="#bd0026"/>
 <text x="762" y="152.5" font-size="12.5" fill="#24303a">Hotspots</text>
-<rect x="413.3421052631579" y="197.6578947368421" width="210" height="108" rx="6" fill="#000" fill-opacity="0.12"/>
-<rect x="411.8421052631579" y="195.1578947368421" width="210" height="108" rx="6" fill="#ffffff" stroke="#c9cfc7"/>
+<rect x="413.5" y="197.5" width="216" height="198" rx="6" fill="#000" fill-opacity="0.12"/>
+<rect x="412" y="195" width="216" height="198" rx="6" fill="#ffffff" stroke="#c9cfc7"/>
 <path d="M508,195 l9,-20 l9,20 z" fill="#ffffff" stroke="#c9cfc7"/>
-<circle cx="425.8421052631579" cy="213.1578947368421" r="5" fill="#e23b2a"/>
-<text x="437.8421052631579" y="217.1578947368421" font-size="12.5" font-weight="700" fill="#1f2a33">HOLE · Oak St · 5 covered nb</text>
-<text x="425.8421052631579" y="237.1578947368421" font-size="12" fill="#33403a">• Corner Bakery</text>
-<text x="425.8421052631579" y="252.1578947368421" font-size="12" fill="#33403a">• City Pharmacy</text>
-<text x="425.8421052631579" y="267.1578947368421" font-size="12" fill="#33403a">• The Old Anchor Pub</text>
-<text x="425.8421052631579" y="282.1578947368421" font-size="12" fill="#33403a">• Green Grocer</text>
-<text x="425.8421052631579" y="294.1578947368421" font-size="11" fill="#2f6fd0">Open in OpenStreetMap ↗</text>
+<rect x="420" y="209" width="9" height="9" rx="1.5" fill="#e23b2a"/>
+<text x="434" y="217" font-size="12.5" font-weight="700" fill="#1f2a33">Hole (skipped)</text>
+<text x="420" y="235" font-size="12" fill="#33403a">5 of 8 neighbours covered</text>
+<text x="420" y="252" font-size="11.5" fill="#2f6fd0">Open in OpenStreetMap &#8599;</text>
+<text x="420" y="269" font-size="11.5" fill="#2f6fd0">Pin &#183; Directions</text>
+<text x="420" y="288" font-size="12" font-weight="700" fill="#1f2a33">targets:</text>
+<text x="422" y="304" font-size="12" fill="#33403a">1. Corner Bakery</text>
+<text x="422" y="319" font-size="12" fill="#33403a">2. City Pharmacy</text>
+<text x="422" y="334" font-size="12" fill="#33403a">3. The Old Anchor Pub</text>
+<text x="422" y="349" font-size="12" fill="#33403a">4. Green Grocer</text>
+<rect x="420" y="360" width="90" height="20" rx="5" fill="#ffffff" stroke="#16a34a"/>
+<text x="465" y="374" text-anchor="middle" font-size="11.5" font-weight="700" fill="#16a34a">&#10003; covered</text>
 <rect x="12" y="530" width="132" height="20" rx="10" fill="#1f2a33" fill-opacity="0.82"/>
 <text x="78" y="544" text-anchor="middle" font-size="11" fill="#fff">illustrative sample</text>
 <text x="892" y="552" text-anchor="end" font-size="10.5" fill="#40484a">Leaflet | © Esri, © OpenStreetMap contributors</text>

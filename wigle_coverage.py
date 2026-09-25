@@ -1266,9 +1266,12 @@ __LEAFLET_JS__
   .targets{max-width:264px}
   .targets b{display:inline}
   .targets .tcol{float:right;border:none;background:none;font:inherit;cursor:pointer;color:#555;padding:0 4px;line-height:1}
+  .targets.tcollapsed{max-width:none;padding:5px 8px}       /* collapsed: fold flat to a left-edge tab */
+  .targets.tcollapsed > b,.targets.tcollapsed .tdoc,.targets.tcollapsed .tsort,.targets.tcollapsed .treset,.targets.tcollapsed .tlist{display:none}
+  .targets.tcollapsed .tcol{float:none;display:block;color:#0b525b;font-weight:700;padding:0;white-space:nowrap;cursor:pointer}
   .targets .tdoc{display:block;margin:4px 0 2px;font-size:12px;color:#0b6b78;text-decoration:none}
   .targets .tdoc:hover{text-decoration:underline}
-  .targets .tlist{list-style:none;margin:6px 0 0;padding:0;max-height:42vh;overflow:auto}
+  .targets .tlist{list-style:none;margin:6px 0 0;padding:0;max-height:68vh;overflow:auto}
   .targets .tlist>li{padding:5px 4px;border-top:1px solid #eee;cursor:pointer;font-size:12px;line-height:1.35}
   .targets .tlist>li:hover{background:#f3f7f7}
   .targets .tlist>li.tbump{animation:tbump 1.7s ease-out}
@@ -1403,8 +1406,10 @@ function bumpTarget(id){
     const db=(b.center[0]-olat)**2 + ((b.center[1]-olon)*k)**2;
     return da - db;                                  // nearest first (clicked cell = distance 0)
   });
-  if (ul.style.display==='none'){                    // expand the list if it was collapsed
-    ul.style.display=''; const b=ul.parentElement.querySelector('.tcol'); if(b) b.innerHTML='&#8211;';
+  const panel = ul.parentElement;                    // the .targets control - re-open it if collapsed to the tab
+  if (panel.classList.contains('tcollapsed')){
+    panel.classList.remove('tcollapsed');
+    const b = panel.querySelector('.tcol'); if(b){ b.innerHTML='&#8211;'; b.title='collapse'; }
   }
   order.forEach(h=>{ const li=ul.querySelector('li[data-id="'+h.id+'"]'); if(li) ul.appendChild(li); });
   ul.scrollTop = 0;                                  // reveal the clicked cell at the top
@@ -1469,10 +1474,10 @@ if (targetHoles.length){
       map.flyTo(h.center, Math.max(map.getZoom(), 17));
       h.layer.openPopup();
     });
-    btn.addEventListener('click', function(){         // collapse / expand the list
-      const hidden = ul.style.display==='none';
-      ul.style.display = hidden ? '' : 'none';
-      btn.innerHTML = hidden ? '&#8211;' : '+';
+    btn.addEventListener('click', function(){         // fold the whole panel flat to a left-edge tab / re-open
+      const col = d.classList.toggle('tcollapsed');
+      btn.innerHTML = col ? '&#127919; Targets &#9656;' : '&#8211;';
+      btn.title = col ? 'expand targets' : 'collapse';
     });
     const rst = d.querySelector('.treset');           // restore all checked-off cells
     if(rst) rst.addEventListener('click', resetCovered);
