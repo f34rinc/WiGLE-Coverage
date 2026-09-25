@@ -1271,7 +1271,8 @@ __LEAFLET_JS__
   .targets.tcollapsed .tcol{float:none;display:block;color:#0b525b;font-weight:700;padding:0;white-space:nowrap;cursor:pointer}
   .targets .tdoc{display:block;margin:4px 0 2px;font-size:12px;color:#0b6b78;text-decoration:none}
   .targets .tdoc:hover{text-decoration:underline}
-  .targets .tlist{list-style:none;margin:6px 0 0;padding:0;max-height:68vh;overflow:auto}
+  .targets .tlist{list-style:none;margin:6px 0 0;padding:0;overflow:auto;
+                  max-height:min(68vh,calc(100vh - 275px))}   /* tall, but leave room for the bottom-left track picker */
   .targets .tlist>li{padding:5px 4px;border-top:1px solid #eee;cursor:pointer;font-size:12px;line-height:1.35}
   .targets .tlist>li:hover{background:#f3f7f7}
   .targets .tlist>li.tbump{animation:tbump 1.7s ease-out}
