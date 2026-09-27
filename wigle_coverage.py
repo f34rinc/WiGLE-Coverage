@@ -1330,6 +1330,9 @@ __LEAFLET_JS__
   .hs-switch button.on{background:#111827;color:#fff;border-color:#111827}
   .hslabel-wifi{display:inline-block}
   .hslabel-bt{display:inline-block;transform:translateY(11px);color:#eaf4ff}
+  /* lay the bottom-left controls (track-colour picker + hotspot switch) in a row so the
+     switch sits to the RIGHT of the picker instead of stacking under the targets list */
+  .leaflet-bottom.leaflet-left{display:flex;align-items:flex-end}
   .navrow{margin-top:6px}
   a.nav{display:inline-block;margin:0 6px 0 0;padding:6px 11px;border-radius:8px;
         background:#2563eb;color:#fff;text-decoration:none;font-weight:600;font-size:12px}

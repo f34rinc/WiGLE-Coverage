@@ -571,6 +571,7 @@ class TestHotspots(unittest.TestCase):
         self.assertIn("color:'#000', weight:5", html)    # black edge behind the thinner blue ring
         self.assertIn("color:'#000', weight:1.5", html)  # black outline around the WiFi disc too
         self.assertIn("hslabel-bt", html)                # BT's offset label so it doesn't overprint WiFi
+        self.assertIn(".leaflet-bottom.leaflet-left{display:flex", html)  # switch sits beside the track picker, not stacked over the targets list
 
 
 class TestRadioTypes(unittest.TestCase):
