@@ -552,9 +552,10 @@ class TestHotspots(unittest.TestCase):
             with open(out, encoding="utf-8") as fh:
                 html = fh.read()
         self.assertIn('"hotspotsBt": [[0, 1, 99]]', html)     # BT data embedded
-        self.assertIn("'Bluetooth'", html)                    # drawn as its own labelled overlay
+        self.assertIn("addBt(", html)                         # BT drawn via its own helper (ring layer)
+        self.assertIn("Bluetooth</b>", html)                  # BT popups are labelled
         self.assertIn("hsramp-bt", html)                      # BT gets its own (blue) ramp
-        self.assertIn("hotspots BT", html)                    # BT legend row, separate from WiFi
+        self.assertIn("lg-ring", html)                        # BT legend row shows a ring example
 
     def test_render_has_hotspot_radio_switch_and_ring_encoding(self):
         import tempfile
@@ -570,7 +571,14 @@ class TestHotspots(unittest.TestCase):
         self.assertIn("fill:false", html)                # BT drawn as a hollow ring, not a disc
         self.assertIn("color:'#000', weight:5", html)    # black edge behind the thinner blue ring
         self.assertIn("color:'#000', weight:1.5", html)  # black outline around the WiFi disc too
-        self.assertIn("hslabel-bt", html)                # BT's offset label so it doesn't overprint WiFi
+        self.assertIn("hslabel-bt", html)                # BT-only cells keep a plain label
+        self.assertIn("hs-split", html)                  # a cell hot in both -> one split circle
+        self.assertIn("linear-gradient(180deg", html)    # 50/50 WiFi(top)|BT(bottom) colour split
+        self.assertIn("Math.max(w.rad, b.rad)", html)    # split circle sized by the larger of the two
+        self.assertIn("-webkit-text-stroke", html)       # numbers use a real black stroke, not a shadow
+        self.assertIn("lg-disc", html)                   # legend shows an example WiFi disc
+        self.assertIn("lg-ring", html)                   # ... a BT ring
+        self.assertIn("lg-split", html)                  # ... and a split-circle example
         self.assertIn(".leaflet-bottom.leaflet-left{display:flex", html)  # switch sits beside the track picker, not stacked over the targets list
 
 
