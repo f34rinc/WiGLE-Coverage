@@ -1546,15 +1546,19 @@ if (D.track && D.track.length){
 // COLORED by rank within that layer (low->high). WiFi = filled disc (warm ramp); Bluetooth
 // = hollow ring (cool ramp), so where a cell is hot in both radios they read as a disc
 // inside a ring instead of overprinting. A WiFi/BT/Both switch (bottom-left) flips which show.
-function drawHotspots(list, ramp, outline, label, ring, labelCls){
+function drawHotspots(list, ramp, label, ring, labelCls){
   if(!list || !list.length) return null;
   const hs = L.layerGroup(), HN = list.length;          // sorted ascending by count
   list.forEach(([r,c,n],i)=>{
     const b=bounds(r,c), ct=center(b);
     const rad = Math.max(6, Math.min(28, 4 + Math.sqrt(n)*0.45));
     const tier = Math.min(ramp.length-1, Math.floor(i / HN * ramp.length));  // quantile / rank tier
-    L.circleMarker(ct, {radius:rad, color: ring ? ramp[tier] : outline, weight: ring ? 3 : 1,
-                        fillColor:ramp[tier], fillOpacity: ring ? 0 : 0.72})
+    // Black edge behind each mark: for a ring, a wider black circle shows as a thin black
+    // line on the inner AND outer side of the thinner coloured ring; the disc gets a black rim.
+    if(ring) L.circleMarker(ct, {radius:rad, color:'#000', weight:5, fill:false, interactive:false}).addTo(hs);
+    const style = ring ? {radius:rad, color:ramp[tier], weight:3, fill:false}
+                       : {radius:rad, color:'#000', weight:1.5, fillColor:ramp[tier], fillOpacity:0.72};
+    L.circleMarker(ct, style)
      .bindTooltip('<span class="'+labelCls+'">'+n+'</span>',
                   {permanent:true, direction:'center', className:'hslabel'})
      .bindPopup('<b>'+n+' '+label+'</b> here (captured)<br>'+maplink(ct[0],ct[1]))
@@ -1562,8 +1566,8 @@ function drawHotspots(list, ramp, outline, label, ring, labelCls){
   });
   return hs;
 }
-const hsWifi = drawHotspots(D.hotspots,   ['#fed976','#feb24c','#fd8d3c','#f03b20','#bd0026'], '#7f1d1d', 'WiFi', false, 'hslabel-wifi');
-const hsBt   = drawHotspots(D.hotspotsBt, ['#c6dbef','#9ecae1','#6baed6','#3182bd','#08519c'], '#08306b', 'Bluetooth', true, 'hslabel-bt');
+const hsWifi = drawHotspots(D.hotspots,   ['#fed976','#feb24c','#fd8d3c','#f03b20','#bd0026'], 'WiFi', false, 'hslabel-wifi');
+const hsBt   = drawHotspots(D.hotspotsBt, ['#c6dbef','#9ecae1','#6baed6','#3182bd','#08519c'], 'Bluetooth', true, 'hslabel-bt');
 
 // One switch drives the hotspot layers (kept out of the top-right layer list so there's no
 // competing, desyncing toggle). Modes: WiFi-only, BT-only, Both. Default = WiFi (or the only one).

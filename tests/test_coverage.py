@@ -565,10 +565,12 @@ class TestHotspots(unittest.TestCase):
                            hotspots=[[0, 0, 268]], hotspots_bt=[[0, 1, 99]])
             with open(out, encoding="utf-8") as fh:
                 html = fh.read()
-        self.assertIn("setHotspotMode", html)   # WiFi/BT/Both segmented switch handler
-        self.assertIn("hs-switch", html)         # the switch control container
-        self.assertIn("ring ? 0", html)          # BT drawn as a hollow ring (transparent fill)
-        self.assertIn("hslabel-bt", html)        # BT's offset label so it doesn't overprint WiFi
+        self.assertIn("setHotspotMode", html)            # WiFi/BT/Both segmented switch handler
+        self.assertIn("hs-switch", html)                 # the switch control container
+        self.assertIn("fill:false", html)                # BT drawn as a hollow ring, not a disc
+        self.assertIn("color:'#000', weight:5", html)    # black edge behind the thinner blue ring
+        self.assertIn("color:'#000', weight:1.5", html)  # black outline around the WiFi disc too
+        self.assertIn("hslabel-bt", html)                # BT's offset label so it doesn't overprint WiFi
 
 
 class TestRadioTypes(unittest.TestCase):
