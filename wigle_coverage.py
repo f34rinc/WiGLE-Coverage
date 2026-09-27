@@ -1325,6 +1325,11 @@ __LEAFLET_JS__
   .hsramp{display:inline-block;width:54px;height:10px;vertical-align:-1px;border:1px solid #0004;
           border-radius:2px;background:linear-gradient(90deg,#fed976,#feb24c,#fd8d3c,#f03b20,#bd0026)}
   .hsramp-bt{background:linear-gradient(90deg,#c6dbef,#9ecae1,#6baed6,#3182bd,#08519c)}
+  .hs-switch button{font:inherit;font-size:12px;margin:4px 4px 0 0;padding:2px 9px;cursor:pointer;
+          border:1px solid #bbb;border-radius:4px;background:#f3f4f6;color:#111827}
+  .hs-switch button.on{background:#111827;color:#fff;border-color:#111827}
+  .hslabel-wifi{display:inline-block}
+  .hslabel-bt{display:inline-block;transform:translateY(11px);color:#eaf4ff}
   .navrow{margin-top:6px}
   a.nav{display:inline-block;margin:0 6px 0 0;padding:6px 11px;border-radius:8px;
         background:#2563eb;color:#fff;text-decoration:none;font-weight:600;font-size:12px}
@@ -1537,27 +1542,55 @@ if (D.track && D.track.length){
   picker.addTo(map);
 }
 
-// hotspots: WiGLE-style circles at the densest cells, sized by network count, number labeled,
-// and COLORED by rank within that layer (low->high) so the top spots pop. WiFi and Bluetooth
-// are separate, independently toggleable layers with their own colour ramps (warm vs cool).
-function drawHotspots(list, ramp, outline, label){
-  if(!list || !list.length) return;
+// hotspots: WiGLE-style density marks at the densest cells, sized by network count and
+// COLORED by rank within that layer (low->high). WiFi = filled disc (warm ramp); Bluetooth
+// = hollow ring (cool ramp), so where a cell is hot in both radios they read as a disc
+// inside a ring instead of overprinting. A WiFi/BT/Both switch (bottom-left) flips which show.
+function drawHotspots(list, ramp, outline, label, ring, labelCls){
+  if(!list || !list.length) return null;
   const hs = L.layerGroup(), HN = list.length;          // sorted ascending by count
   list.forEach(([r,c,n],i)=>{
     const b=bounds(r,c), ct=center(b);
     const rad = Math.max(6, Math.min(28, 4 + Math.sqrt(n)*0.45));
     const tier = Math.min(ramp.length-1, Math.floor(i / HN * ramp.length));  // quantile / rank tier
-    L.circleMarker(ct, {radius:rad, color:outline, weight:1,
-                        fillColor:ramp[tier], fillOpacity:.72})
-     .bindTooltip(''+n, {permanent:true, direction:'center', className:'hslabel'})
+    L.circleMarker(ct, {radius:rad, color: ring ? ramp[tier] : outline, weight: ring ? 3 : 1,
+                        fillColor:ramp[tier], fillOpacity: ring ? 0 : 0.72})
+     .bindTooltip('<span class="'+labelCls+'">'+n+'</span>',
+                  {permanent:true, direction:'center', className:'hslabel'})
      .bindPopup('<b>'+n+' '+label+'</b> here (captured)<br>'+maplink(ct[0],ct[1]))
      .addTo(hs);
   });
-  hs.addTo(map);
-  layerCtl.addOverlay(hs, 'Hotspots ('+label+')');
+  return hs;
 }
-drawHotspots(D.hotspots,   ['#fed976','#feb24c','#fd8d3c','#f03b20','#bd0026'], '#7f1d1d', 'WiFi');
-drawHotspots(D.hotspotsBt, ['#c6dbef','#9ecae1','#6baed6','#3182bd','#08519c'], '#08306b', 'Bluetooth');
+const hsWifi = drawHotspots(D.hotspots,   ['#fed976','#feb24c','#fd8d3c','#f03b20','#bd0026'], '#7f1d1d', 'WiFi', false, 'hslabel-wifi');
+const hsBt   = drawHotspots(D.hotspotsBt, ['#c6dbef','#9ecae1','#6baed6','#3182bd','#08519c'], '#08306b', 'Bluetooth', true, 'hslabel-bt');
+
+// One switch drives the hotspot layers (kept out of the top-right layer list so there's no
+// competing, desyncing toggle). Modes: WiFi-only, BT-only, Both. Default = WiFi (or the only one).
+function setHotspotMode(mode){
+  if(hsWifi){ mode==='BT' ? map.removeLayer(hsWifi) : hsWifi.addTo(map); }
+  if(hsBt){   mode==='WiFi' ? map.removeLayer(hsBt)  : hsBt.addTo(map); }
+  document.querySelectorAll('.hs-switch button').forEach(b=> b.classList.toggle('on', b.dataset.mode===mode));
+}
+if(hsWifi || hsBt){
+  const initial = hsWifi ? 'WiFi' : 'BT';
+  if(hsWifi && hsBt){                                    // only worth a switch when both exist
+    const ctl = L.control({position:'bottomleft'});
+    ctl.onAdd = function(){
+      const d = L.DomUtil.create('div', 'legend hs-switch');
+      d.innerHTML = '<b>Hotspots</b>';
+      ['WiFi','BT','Both'].forEach(m=>{
+        const btn = L.DomUtil.create('button', '', d);
+        btn.textContent = m; btn.dataset.mode = m;
+        btn.addEventListener('click', ()=> setHotspotMode(m));
+      });
+      L.DomEvent.disableClickPropagation(d);
+      return d;
+    };
+    ctl.addTo(map);
+  }
+  setHotspotMode(initial);
+}
 
 map.fitBounds(D.fit);
 
@@ -1569,6 +1602,7 @@ lg.onAdd = function(){ const d=L.DomUtil.create('div','legend');
    + '<div><span class="sw" style="background:#f59e0b"></span>edge &ndash; frontier (touches)</div>'
    + (D.hotspots && D.hotspots.length ? '<div style="margin-top:2px">hotspots WiFi <span class="hsramp"></span> fewer&rarr;more</div>' : '')
    + (D.hotspotsBt && D.hotspotsBt.length ? '<div style="margin-top:2px">hotspots BT <span class="hsramp hsramp-bt"></span> fewer&rarr;more</div>' : '')
+   + (D.hotspots && D.hotspots.length && D.hotspotsBt && D.hotspotsBt.length ? '<div style="margin-top:1px;color:#555;font-size:11px">&#9679; disc = WiFi &middot; &#9711; ring = BT</div>' : '')
    + (D.track && D.track.length ? '<div><span class="sw" id="trkSw" style="background:#111827"></span>your track</div>' : '')
    + '<div style="margin-top:4px;color:#555">'+D.covered.length+' covered cells &middot; '
    + D.recs.length+' suggestions</div>';

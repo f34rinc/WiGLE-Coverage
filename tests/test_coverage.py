@@ -556,6 +556,20 @@ class TestHotspots(unittest.TestCase):
         self.assertIn("hsramp-bt", html)                      # BT gets its own (blue) ramp
         self.assertIn("hotspots BT", html)                    # BT legend row, separate from WiFi
 
+    def test_render_has_hotspot_radio_switch_and_ring_encoding(self):
+        import tempfile
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "m.html")
+            wc.render_html({(0, 0): 3, (0, 1): 3}, [], dlat, dlon, 2, out,
+                           hotspots=[[0, 0, 268]], hotspots_bt=[[0, 1, 99]])
+            with open(out, encoding="utf-8") as fh:
+                html = fh.read()
+        self.assertIn("setHotspotMode", html)   # WiFi/BT/Both segmented switch handler
+        self.assertIn("hs-switch", html)         # the switch control container
+        self.assertIn("ring ? 0", html)          # BT drawn as a hollow ring (transparent fill)
+        self.assertIn("hslabel-bt", html)        # BT's offset label so it doesn't overprint WiFi
+
 
 class TestRadioTypes(unittest.TestCase):
     def test_radio_types_mapping(self):
