@@ -542,6 +542,108 @@ class TestHotspots(unittest.TestCase):
                 html = fh.read()
         self.assertIn('"hotspots": [[0, 0, 268]]', html)
 
+    def test_render_embeds_bt_hotspots_as_own_layer(self):
+        import tempfile
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "m.html")
+            wc.render_html({(0, 0): 3, (0, 1): 3}, [], dlat, dlon, 2, out,
+                           hotspots=[[0, 0, 268]], hotspots_bt=[[0, 1, 99]])
+            with open(out, encoding="utf-8") as fh:
+                html = fh.read()
+        self.assertIn('"hotspotsBt": [[0, 1, 99]]', html)     # BT data embedded
+        self.assertIn("'Bluetooth'", html)                    # drawn as its own labelled overlay
+        self.assertIn("hsramp-bt", html)                      # BT gets its own (blue) ramp
+        self.assertIn("hotspots BT", html)                    # BT legend row, separate from WiFi
+
+
+class TestRadioTypes(unittest.TestCase):
+    def test_radio_types_mapping(self):
+        self.assertEqual(wc._radio_types("wifi"), ("W",))
+        self.assertEqual(wc._radio_types("bt"), ("B", "E"))   # classic + BLE
+        self.assertIsNone(wc._radio_types("all"))             # no filter
+
+    def _make_net_db(self, path):
+        import sqlite3
+        con = sqlite3.connect(path)
+        con.execute("CREATE TABLE network (bssid TEXT, type TEXT, bestlat REAL, bestlon REAL)")
+        con.executemany(
+            "INSERT INTO network (bssid,type,bestlat,bestlon) VALUES (?,?,?,?)",
+            [("AA", "W", 40.0, -111.0), ("BB", "E", 40.0, -111.0),
+             ("CC", "B", 41.0, -112.0), ("DD", "G", 42.0, -113.0),
+             ("EE", "W", 0.0, 0.0)])   # zero-island -> excluded regardless of type
+        con.commit()
+        con.close()
+
+    def test_parse_networks_wifi_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "n.sqlite")
+            self._make_net_db(p)
+            pts = wc.parse_sqlite_networks(p, ("W",))
+        self.assertEqual(pts, [(40.0, -111.0)])               # only AA; EE zero-island dropped
+
+    def test_parse_networks_bt_is_classic_plus_ble(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "n.sqlite")
+            self._make_net_db(p)
+            pts = sorted(wc.parse_sqlite_networks(p, ("B", "E")))
+        self.assertEqual(pts, [(40.0, -111.0), (41.0, -112.0)])   # BB(E) + CC(B)
+
+    def test_parse_networks_default_all_types(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "n.sqlite")
+            self._make_net_db(p)
+            pts = wc.parse_sqlite_networks(p)                 # default None -> no type filter
+        self.assertEqual(len(pts), 4)                         # AA,BB,CC,DD; EE excluded
+
+    def _make_run_db(self, path):
+        import sqlite3
+        con = sqlite3.connect(path)
+        con.execute("CREATE TABLE location (bssid TEXT, lat REAL, lon REAL, time INTEGER)")
+        con.execute("CREATE TABLE network (bssid TEXT, type TEXT)")
+        con.executemany("INSERT INTO location (bssid,lat,lon,time) VALUES (?,?,?,?)",
+                        [("AA", 40.0, -111.0, 1100), ("BB", 40.0, -111.0, 1200),
+                         ("CC", 40.0, -111.0, 1300)])
+        con.executemany("INSERT INTO network (bssid,type) VALUES (?,?)",
+                        [("AA", "W"), ("BB", "E"), ("CC", "W")])
+        con.commit()
+        con.close()
+
+    def test_run_counts_wifi_only_joins_type(self):
+        dlat, dlon = wc.meters_to_deg(50, 40.0)
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "b.sqlite")
+            self._make_run_db(p)
+            counts = wc.run_network_counts(p, 1000, 2000, dlat, dlon, ("W",))
+        cell = wc.cell_of(40.0, -111.0, dlat, dlon)
+        self.assertEqual(counts[cell], 2)                     # AA + CC; BB(BLE) filtered out
+
+    def test_run_counts_bt_only(self):
+        dlat, dlon = wc.meters_to_deg(50, 40.0)
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "b.sqlite")
+            self._make_run_db(p)
+            counts = wc.run_network_counts(p, 1000, 2000, dlat, dlon, ("B", "E"))
+        cell = wc.cell_of(40.0, -111.0, dlat, dlon)
+        self.assertEqual(counts[cell], 1)                     # only BB
+
+
+class TestRadioArg(unittest.TestCase):
+    def _parse(self, argv):
+        old = sys.argv
+        sys.argv = ["wc"] + argv
+        try:
+            return wc.parse_args()
+        finally:
+            sys.argv = old
+
+    def test_radio_defaults_to_wifi(self):
+        self.assertEqual(self._parse([]).radio, "wifi")
+
+    def test_radio_accepts_bt_and_all(self):
+        self.assertEqual(self._parse(["--radio", "bt"]).radio, "bt")
+        self.assertEqual(self._parse(["--radio", "all"]).radio, "all")
+
 
 class TestFmtSecs(unittest.TestCase):
     def test_formats_elapsed(self):
@@ -755,6 +857,7 @@ class TestMenuNamespace(unittest.TestCase):
     def test_defaults_when_unset(self):
         ns = wc._menu_namespace(dict(self.BASE))
         self.assertIsNone(ns.hotspot)
+        self.assertEqual(ns.radio, "wifi")               # radio defaults to wifi-only
         self.assertIsNone(ns.track)
         self.assertIsNone(ns.out)
         self.assertFalse(ns.refresh_pois)
@@ -763,11 +866,12 @@ class TestMenuNamespace(unittest.TestCase):
         self.assertEqual(ns.max_pois_per_hole, wc.MAX_POIS_PER_HOLE)
 
     def test_tunables_pass_through(self):
-        st = dict(self.BASE, hotspot=25, max_pois=0, max_pois_per_hole=6,
+        st = dict(self.BASE, hotspot=25, radio="all", max_pois=0, max_pois_per_hole=6,
                   run_gap=45, track_gap=8, refresh_pois=True, refresh_overture=True,
                   track="run.gpx", out="map.html")
         ns = wc._menu_namespace(st)
         self.assertEqual(ns.hotspot, 25)
+        self.assertEqual(ns.radio, "all")
         self.assertEqual(ns.max_pois, 0)              # 0 = no cap, must survive
         self.assertEqual(ns.max_pois_per_hole, 6)
         self.assertEqual(ns.run_gap, 45)

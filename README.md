@@ -33,7 +33,7 @@ the script, then run it with **no arguments** for an interactive menu:
 ```
 python wigle_coverage.py
 #  data   | ./data   (backup: WiGLE Database Backup.sqlite)
-#  grid   | cell 50 m | min-obs 2 | hole 5 | hotspot auto
+#  grid   | cell 50 m | min-obs 2 | hole 5 | hotspot auto | radio wifi
 #  gaps   | run 30 min | track 5 min
 #  mode   | entire-DB / union
 #  pois   | on | 100 total, 4/hole
@@ -166,6 +166,7 @@ The full flag list (grouped as `python wigle_coverage.py --help` prints them):
 | `--min-obs N` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
 | `--hole-threshold N` | 5 | covered neighbours (of 8) for a "hole" vs an "edge" |
 | `--hotspot N` | adaptive | circles on cells with ≥ N networks (default: top 10%; 0 = off) |
+| `--radio R` | `wifi` | which radio the hotspots count: `wifi`, `bt` (classic + BLE), or `all` (both, separate colour-coded layers). SQLite only |
 | `--track-gap MIN` | 5 | minutes between GPS fixes that starts a new path segment |
 
 **Interface + output**
@@ -200,6 +201,8 @@ labeled on each (click for the exact number). It counts *actual APs* — from th
 directly, or from the SQLite backup's `network` table (not the GPS track). In a `--run` / `--date` view it instead counts the distinct networks *observed on that walk* (from the backup's `location` table, within the run's time window), so the hotspots match that run's coverage rather than your whole history — the two views' numbers won't line up 1:1, which is expected. By default it
 shows your **top ~10% densest cells** (adaptive per dataset); `--hotspot N` sets an absolute
 threshold (only cells with ≥ N networks), and `--hotspot 0` turns it off.
+
+By default hotspots count **WiFi only** (WiGLE type `W`). `--radio bt` counts Bluetooth instead (classic + BLE) as its own **blue** layer, and `--radio all` draws **both** — WiFi in the warm red ramp, Bluetooth in blue — as separate, independently toggleable layers, each with its own adaptive threshold. Bluetooth density runs much higher than WiFi because BLE devices with rotating random MACs each read as a distinct network, so keeping it on a separate layer (and off by default) stops it from swamping the WiFi coverage picture. The radio filter reads the `network.type` column, so it needs a **SQLite backup**; KML/CSV rows carry no type and stay a single combined layer.
 
 **Your actual path.** Pass `--track "C:\...\WiGLE Database Backup.sqlite"` and the map
 gains a toggle-able **line of where you really walked** (**black by default**, recolorable

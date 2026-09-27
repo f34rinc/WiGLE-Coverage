@@ -96,6 +96,11 @@ CELL_SIZE_M   = 50      # grid cell edge in metres (~half a block; near the GPS 
 MIN_OBS       = 2       # APs in a cell before it counts as "covered" (filters strays)
 HOLE_THRESHOLD = 5      # covered 8-neighbours at/above this => "hole", else "edge"
 HOTSPOT_PCTL   = 90     # default "hotspots" = the top (100-this)% densest cells (adaptive)
+# Hotspot radio filter. WiGLE tags each `network` row by type: W=WiFi, B=Bluetooth
+# classic, E=BLE, G/L/C/D=cell/other. "bt" folds classic + BLE; "all" = no filter
+# (mixes every radio, so BLE random MACs inflate counts - kept as an explicit opt-in).
+RADIO_CHOICES = ("wifi", "bt", "all")
+RADIO_TYPES   = {"wifi": ("W",), "bt": ("B", "E")}   # "all" -> None (no type filter)
 TRACK_GAP_MIN  = 5      # minutes; a larger gap between fixes starts a new track segment
 TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one (jitter)
 RUN_GAP_MIN    = 30     # minutes of quiet that separates one run/session from the next
@@ -489,42 +494,59 @@ def parse_gpx_track(path):
     return segs
 
 
-def parse_sqlite_networks(path):
+def _radio_types(radio):
+    """SQL `network.type` codes for a --radio name, or None for 'all' (no filter)."""
+    return RADIO_TYPES.get(radio)
+
+
+def parse_sqlite_networks(path, types=None):
     """Network locations from a WiGLE SQLite backup's `network` table (best-fix lat/lon).
     Returns [(lat, lon), ...] - the actual APs, for counting "networks captured" per cell
-    (the WiGLE hotspot metric), distinct from the GPS track in `location`. Read-only."""
+    (the WiGLE hotspot metric), distinct from the GPS track in `location`. Read-only.
+    `types` is a tuple of `network.type` codes to keep (e.g. ("W",) for WiFi); None keeps
+    every radio (WiFi, Bluetooth, cell)."""
     import sqlite3
     import urllib.request
     uri = "file:" + urllib.request.pathname2url(os.path.abspath(path)) + "?mode=ro"
     con = sqlite3.connect(uri, uri=True)
+    where = ("bestlat BETWEEN -90 AND 90 AND bestlon BETWEEN -180 AND 180 "
+             "AND NOT (bestlat = 0 AND bestlon = 0)")
+    params = ()
+    if types:
+        where = f"type IN ({','.join('?' * len(types))}) AND " + where
+        params = tuple(types)
     try:
-        rows = con.execute(
-            "SELECT bestlat, bestlon FROM network "
-            "WHERE bestlat BETWEEN -90 AND 90 AND bestlon BETWEEN -180 AND 180 "
-            "AND NOT (bestlat = 0 AND bestlon = 0)").fetchall()
+        rows = con.execute(f"SELECT bestlat, bestlon FROM network WHERE {where}", params).fetchall()
     finally:
         con.close()
     return [(float(la), float(lo)) for (la, lo) in rows]
 
 
-def run_network_counts(path, t0, t1, dlat, dlon):
+def run_network_counts(path, t0, t1, dlat, dlon, types=None):
     """Distinct networks (BSSIDs) per grid cell observed within a single run's time
     window [t0, t1] (epoch ms), from the `location` table. Unlike the whole-DB
     `network` source, `location` logs one row PER OBSERVATION, so this dedups by BSSID
     (each network counts once per cell) - otherwise a network logged dozens of times
     would blow up the density. Returns {(row,col): distinct_bssid_count}. Read-only.
     This is the per-run hotspot metric, so hotspots match the run's own coverage
-    instead of all-history."""
+    instead of all-history. `types` filters by radio - since `location` has no type
+    column, it joins `network` on bssid to read it; None keeps every radio."""
     import sqlite3
     import urllib.request
     uri = "file:" + urllib.request.pathname2url(os.path.abspath(path)) + "?mode=ro"
     con = sqlite3.connect(uri, uri=True)
+    where = ("l.time BETWEEN ? AND ? AND l.lat BETWEEN -90 AND 90 "
+             "AND l.lon BETWEEN -180 AND 180 AND NOT (l.lat = 0 AND l.lon = 0)")
+    params = [int(t0), int(t1)]
+    join = ""
+    if types:                                    # location has no type -> join network for it
+        join = "JOIN network n ON n.bssid = l.bssid"
+        where += f" AND n.type IN ({','.join('?' * len(types))})"
+        params += list(types)
     try:
         rows = con.execute(
-            "SELECT bssid, lat, lon FROM location "
-            "WHERE time BETWEEN ? AND ? AND lat BETWEEN -90 AND 90 "
-            "AND lon BETWEEN -180 AND 180 AND NOT (lat = 0 AND lon = 0)",
-            (int(t0), int(t1))).fetchall()
+            f"SELECT l.bssid, l.lat, l.lon FROM location l {join} WHERE {where}",
+            params).fetchall()
     finally:
         con.close()
     seen = {}                                    # cell -> set of BSSIDs observed there
@@ -1302,6 +1324,7 @@ __LEAFLET_JS__
   .hslabel::before{display:none}
   .hsramp{display:inline-block;width:54px;height:10px;vertical-align:-1px;border:1px solid #0004;
           border-radius:2px;background:linear-gradient(90deg,#fed976,#feb24c,#fd8d3c,#f03b20,#bd0026)}
+  .hsramp-bt{background:linear-gradient(90deg,#c6dbef,#9ecae1,#6baed6,#3182bd,#08519c)}
   .navrow{margin-top:6px}
   a.nav{display:inline-block;margin:0 6px 0 0;padding:6px 11px;border-radius:8px;
         background:#2563eb;color:#fff;text-decoration:none;font-weight:600;font-size:12px}
@@ -1515,24 +1538,26 @@ if (D.track && D.track.length){
 }
 
 // hotspots: WiGLE-style circles at the densest cells, sized by network count, number labeled,
-// and COLORED by rank within your hotspots (ColorBrewer YlOrRd, low->high) so the top spots pop
-if (D.hotspots && D.hotspots.length){
-  const hs = L.layerGroup();
-  const HSC = ['#fed976','#feb24c','#fd8d3c','#f03b20','#bd0026'];   // YlOrRd 5-class
-  const HN = D.hotspots.length;                                      // sorted ascending by count
-  D.hotspots.forEach(([r,c,n],i)=>{
+// and COLORED by rank within that layer (low->high) so the top spots pop. WiFi and Bluetooth
+// are separate, independently toggleable layers with their own colour ramps (warm vs cool).
+function drawHotspots(list, ramp, outline, label){
+  if(!list || !list.length) return;
+  const hs = L.layerGroup(), HN = list.length;          // sorted ascending by count
+  list.forEach(([r,c,n],i)=>{
     const b=bounds(r,c), ct=center(b);
     const rad = Math.max(6, Math.min(28, 4 + Math.sqrt(n)*0.45));
-    const tier = Math.min(HSC.length-1, Math.floor(i / HN * HSC.length));  // quantile / rank tier
-    L.circleMarker(ct, {radius:rad, color:'#7f1d1d', weight:1,
-                        fillColor:HSC[tier], fillOpacity:.72})
+    const tier = Math.min(ramp.length-1, Math.floor(i / HN * ramp.length));  // quantile / rank tier
+    L.circleMarker(ct, {radius:rad, color:outline, weight:1,
+                        fillColor:ramp[tier], fillOpacity:.72})
      .bindTooltip(''+n, {permanent:true, direction:'center', className:'hslabel'})
-     .bindPopup('<b>'+n+' networks</b> here (SSIDs captured)<br>'+maplink(ct[0],ct[1]))
+     .bindPopup('<b>'+n+' '+label+'</b> here (captured)<br>'+maplink(ct[0],ct[1]))
      .addTo(hs);
   });
   hs.addTo(map);
-  layerCtl.addOverlay(hs, 'Hotspots (networks)');
+  layerCtl.addOverlay(hs, 'Hotspots ('+label+')');
 }
+drawHotspots(D.hotspots,   ['#fed976','#feb24c','#fd8d3c','#f03b20','#bd0026'], '#7f1d1d', 'WiFi');
+drawHotspots(D.hotspotsBt, ['#c6dbef','#9ecae1','#6baed6','#3182bd','#08519c'], '#08306b', 'Bluetooth');
 
 map.fitBounds(D.fit);
 
@@ -1542,7 +1567,8 @@ lg.onAdd = function(){ const d=L.DomUtil.create('div','legend');
    + '<div><span class="sw" style="background:#0b525b"></span>covered (dense &rarr; light)</div>'
    + '<div><span class="sw" style="background:#dc2626"></span>hole &ndash; skipped (surrounded)</div>'
    + '<div><span class="sw" style="background:#f59e0b"></span>edge &ndash; frontier (touches)</div>'
-   + (D.hotspots && D.hotspots.length ? '<div style="margin-top:2px">hotspots (networks) <span class="hsramp"></span> fewer&rarr;more</div>' : '')
+   + (D.hotspots && D.hotspots.length ? '<div style="margin-top:2px">hotspots WiFi <span class="hsramp"></span> fewer&rarr;more</div>' : '')
+   + (D.hotspotsBt && D.hotspotsBt.length ? '<div style="margin-top:2px">hotspots BT <span class="hsramp hsramp-bt"></span> fewer&rarr;more</div>' : '')
    + (D.track && D.track.length ? '<div><span class="sw" id="trkSw" style="background:#111827"></span>your track</div>' : '')
    + '<div style="margin-top:4px;color:#555">'+D.covered.length+' covered cells &middot; '
    + D.recs.length+' suggestions</div>';
@@ -1553,7 +1579,7 @@ lg.addTo(map);
 
 def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=None,
                 map_key=None, poi_by_hole=None, targets_doc=None, more_by_hole=None,
-                hotspots=None):
+                hotspots=None, hotspots_bt=None):
     poi_by_hole = poi_by_hole or {}
     more_by_hole = more_by_hole or {}
     covered = covered_cells(coverage, min_obs)
@@ -1575,7 +1601,8 @@ def render_html(coverage, recs, dlat, dlon, min_obs, out_path, track_segments=No
         fit = [[0, 0], [0, 0]]
     data = {"dlat": dlat, "dlon": dlon, "covered": cov_list, "recs": rec_list,
             "fit": fit, "track": track_segments or [], "mapKey": map_key or "",
-            "targetsDoc": targets_doc or "", "hotspots": hotspots or []}
+            "targetsDoc": targets_doc or "", "hotspots": hotspots or [],
+            "hotspotsBt": hotspots_bt or []}
     title = "WiGLE coverage &amp; frontier"
     # Escape <, >, & in the embedded JSON so a POI name from OSM can't break out of the
     # <script> block (e.g. a business literally named "</script>"). JSON \uXXXX escapes
@@ -1701,6 +1728,10 @@ def parse_args():
     g.add_argument("--hotspot", type=int, default=None, metavar="N",
                    help="show WiGLE-style circles on cells with >= N networks captured "
                         f"(default: adaptive, your top {100 - HOTSPOT_PCTL}%% densest; 0 = off)")
+    g.add_argument("--radio", choices=RADIO_CHOICES, default="wifi", metavar="R",
+                   help="which radio the hotspots count: 'wifi' (default), 'bt' (Bluetooth "
+                        "classic + BLE, its own blue layer), or 'all' (both as separate "
+                        "colour-coded layers). Needs a SQLite backup; no-op on KML/CSV.")
     g.add_argument("--track-gap", type=float, default=TRACK_GAP_MIN, metavar="MIN",
                    help=f"minutes that break the path into segments (default {TRACK_GAP_MIN})")
 
@@ -1874,35 +1905,55 @@ def run(args):
     print(f"  {holes:,} holes + {edges:,} edges; rendering map...")
 
     # Hotspots: count actual NETWORKS per cell ("SSIDs captured", the WiGLE metric) - not GPS
-    # fixes. KML/CSV points already ARE networks; from a SQLite backup, read the `network` table.
-    if (args.run or args.date) and sqlite_path and track_fixes:
-        # per-run hotspots: distinct BSSIDs observed within THIS run's time window (from
-        # `location`), so density matches the run's coverage instead of all-history.
-        times = [t for (t, _, _) in track_fixes]
-        try:
-            net_counts = run_network_counts(sqlite_path, min(times), max(times), dlat, dlon)
-        except Exception:
-            net_counts = coverage
-    elif cover_files and not (args.run or args.date):
-        net_counts = coverage
-    elif sqlite_path:
-        try:
-            nets = [(la, lo) for (la, lo) in parse_sqlite_networks(sqlite_path)
-                    if -90 <= la <= 90 and -180 <= lo <= 180 and not (la == 0 and lo == 0)]
-            net_counts = build_coverage(nets, dlat, dlon)
-        except Exception:
-            net_counts = coverage
-    else:
-        net_counts = coverage
+    # fixes. KML/CSV points already ARE networks; from a SQLite backup, read the `network`
+    # table (or, for a run/date view, the `location` observations in the window). --radio
+    # filters by radio: WiFi (default), Bluetooth (its own layer), or both.
+    def net_counts_for(types):
+        """Per-cell network counts for one radio (a `types` tuple), or None when the active
+        source has no radio type (KML/CSV) so the caller can fall back to one combined layer."""
+        if (args.run or args.date) and sqlite_path and track_fixes:
+            times = [t for (t, _, _) in track_fixes]
+            try:
+                return run_network_counts(sqlite_path, min(times), max(times), dlat, dlon, types)
+            except Exception:
+                return coverage
+        if cover_files and not (args.run or args.date):
+            return None if types else coverage          # KML/CSV rows carry no type
+        if sqlite_path:
+            try:
+                nets = [(la, lo) for (la, lo) in parse_sqlite_networks(sqlite_path, types)
+                        if -90 <= la <= 90 and -180 <= lo <= 180 and not (la == 0 and lo == 0)]
+                return build_coverage(nets, dlat, dlon)
+            except Exception:
+                return coverage
+        return None if types else coverage
+
     hs_arg = getattr(args, "hotspot", None)
-    if hs_arg is None:                              # adaptive default: the top ~10% densest cells
-        hs_thr = max(3, _percentile(sorted(net_counts.values()), HOTSPOT_PCTL))
-    else:
-        hs_thr = hs_arg
-    hotspots = hotspot_cells(net_counts, hs_thr) if hs_thr and hs_thr > 0 else []
-    if hotspots:
-        print(f"  {len(hotspots):,} hotspot cell(s) with {C.b}>={hs_thr}{C.reset} networks "
-              f"{C.dim}(peak {max(h[2] for h in hotspots):,}){C.reset}")
+
+    def hs_from(counts):
+        """(hotspot cells, threshold) for a count map; threshold adaptive unless --hotspot set."""
+        if not counts:
+            return [], 0
+        thr = hs_arg if hs_arg is not None else max(3, _percentile(sorted(counts.values()),
+                                                                    HOTSPOT_PCTL))
+        return (hotspot_cells(counts, thr) if thr and thr > 0 else []), thr
+
+    radio = getattr(args, "radio", "wifi") or "wifi"
+    wifi_counts = net_counts_for(_radio_types("wifi")) if radio in ("wifi", "all") else None
+    bt_counts = net_counts_for(_radio_types("bt")) if radio in ("bt", "all") else None
+    if ((radio in ("wifi", "all") and wifi_counts is None)
+            or (radio in ("bt", "all") and bt_counts is None)):
+        # KML/CSV has no radio type: can't split - fall back to one combined layer.
+        if radio != "wifi":                             # only warn if the user asked to split
+            print(f"  {C.yellow}note{C.reset}: --radio needs a SQLite backup; KML/CSV rows carry "
+                  f"no radio type, so hotspots stay one combined layer")
+        wifi_counts, bt_counts = coverage, None
+    hotspots, wifi_thr = hs_from(wifi_counts)
+    hotspots_bt, bt_thr = hs_from(bt_counts)
+    for label, hs, thr in (("WiFi", hotspots, wifi_thr), ("Bluetooth", hotspots_bt, bt_thr)):
+        if hs:
+            print(f"  {len(hs):,} {label} hotspot cell(s) with {C.b}>={thr}{C.reset} networks "
+                  f"{C.dim}(peak {max(h[2] for h in hs):,}){C.reset}")
 
     track_segs = None
     if gpx_track:
@@ -2011,7 +2062,7 @@ def run(args):
     render_html(coverage, recs, dlat, dlon, args.min_obs, out,
                 track_segments=track_segs, map_key=read_map_key(), poi_by_hole=poi_by_hole,
                 targets_doc=os.path.basename(tpath_html) if tpath_html else None,
-                more_by_hole=more_by_hole, hotspots=hotspots)
+                more_by_hole=more_by_hole, hotspots=hotspots, hotspots_bt=hotspots_bt)
 
     print(_rule("="))
     print(f"  {len(points):,} points  ->  {C.b}{len(covered):,}{C.reset} covered cells (~{args.cell_size:.0f} m)")
@@ -2067,7 +2118,7 @@ def _menu_status(st):
     refresh_lbl = f"  |  refresh armed: {C.yellow}{'+'.join(armed)}{r}" if armed else ""
     print(f"  {b}data {r} | {st['data']}")
     print(f"  {b}found{r} | {found}")
-    print(f"  {b}grid {r} | cell {g}{st['cell_size']:.0f} m{r} | min-obs {st['min_obs']} | hole {st['hole_threshold']} | hotspot {g}{hs_lbl}{r}")
+    print(f"  {b}grid {r} | cell {g}{st['cell_size']:.0f} m{r} | min-obs {st['min_obs']} | hole {st['hole_threshold']} | hotspot {g}{hs_lbl}{r} | radio {g}{st.get('radio', 'wifi')}{r}")
     print(f"  {b}gaps {r} | run {st['run_gap']} min | track {st['track_gap']} min")
     print(f"  {b}mode {r} | {g}{mode}{r}")
     print(f"  {b}pois {r} | {'on' if st.get('pois') else 'off'} | {mp_lbl} total, {ph_lbl}/hole{refresh_lbl}")
@@ -2095,6 +2146,7 @@ def _menu_help():
     print(f"  {y}run{r} N          just run N              {y}date{r} YYYY-MM-DD   just that date")
     print(_rule(label="tune the grid + track"))
     print(f"  {y}cell{r} N  grid m   {y}min{r} N  min obs   {y}hole{r} N  hole thresh   {y}hotspot{r} N  (0=off, auto)")
+    print(f"  {y}radio{r} wifi|bt|all   which radio the hotspots count (default wifi; needs a .sqlite)")
     print(f"  {y}rungap{r} N       session split (min)     {y}trackgap{r} N   path split (min)")
     print(_rule(label="data + output"))
     print(f"  {y}data{r} <path>    read a different folder")
@@ -2121,6 +2173,7 @@ _MENU_GUIDE = [
         ("min N", "How many networks a cell needs before it counts as 'covered' - filters stray fixes. Default 2."),
         ("hole N", "Of a cell's 8 neighbours, how many must be covered for it to rank as a 'hole' (a street you skipped) vs an 'edge' (the frontier). Higher = stricter, so fewer holes. Default 5."),
         ("hotspot N", "Density circles on cells with at least N networks. 0 turns them off; 'auto' marks the top ~10% densest, adaptive per dataset (the default)."),
+        ("radio wifi|bt|all", "Which radio the hotspot circles count: wifi (default), bt (Bluetooth classic + BLE, its own blue layer), or all (both as separate colour-coded layers). Needs a SQLite backup; KML/CSV rows carry no radio type."),
     ]),
     ("track", "runs + track segmentation", [
         ("rungap N", "Minutes of gap between fixes that starts a new run, for the run/date views. Default 30."),
@@ -2203,7 +2256,7 @@ def _menu_namespace(st, list_runs=False):
         date=st["date"] if st["mode"] == "date" else None,
         pois=st.get("pois", True), poi_source=st.get("poi_source", "overture"),
         overture_confidence=OVERTURE_MIN_CONFIDENCE, overture_release=OVERTURE_RELEASE,
-        hotspot=st.get("hotspot"),
+        hotspot=st.get("hotspot"), radio=st.get("radio", "wifi"),
         max_pois_per_hole=st.get("max_pois_per_hole", MAX_POIS_PER_HOLE),
         max_pois=st.get("max_pois", MAX_POIS_TOTAL),
         refresh_pois=st.get("refresh_pois", False),
@@ -2216,7 +2269,7 @@ def interactive_menu(args):
           "hole_threshold": args.hole_threshold, "run_gap": args.run_gap,
           "track_gap": args.track_gap, "mode": "all", "run": None, "date": None,
           "pois": getattr(args, "pois", True), "poi_source": getattr(args, "poi_source", "overture"),
-          "hotspot": getattr(args, "hotspot", None),
+          "hotspot": getattr(args, "hotspot", None), "radio": getattr(args, "radio", "wifi"),
           "max_pois": getattr(args, "max_pois", MAX_POIS_TOTAL),
           "max_pois_per_hole": getattr(args, "max_pois_per_hole", MAX_POIS_PER_HOLE),
           "refresh_pois": False, "refresh_overture": False,
@@ -2274,6 +2327,12 @@ def interactive_menu(args):
                     st["hotspot"] = int(arg)
                     lbl = "off" if st["hotspot"] == 0 else str(st["hotspot"])
                 _redraw(st, changed=f"hotspot -> {lbl}")
+            elif cmd == "radio":
+                if arg in RADIO_CHOICES:
+                    st["radio"] = arg
+                    _redraw(st, changed=f"radio -> {arg}")
+                else:
+                    _redraw(st, note=f"  {C.yellow}radio takes: {', '.join(RADIO_CHOICES)}{C.reset}")
             elif cmd in ("max", "maxpois") and arg:
                 st["max_pois"] = int(arg)
                 _redraw(st, changed=f"max-pois -> {'all' if st['max_pois'] == 0 else st['max_pois']}")
