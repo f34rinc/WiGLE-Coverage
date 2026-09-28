@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560" font-family="ui-sans-serif, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
-<defs><clipPath id="frame"><rect x="0" y="0" width="900" height="560" rx="8"/></clipPath></defs>
+<defs><clipPath id="frame"><rect x="0" y="0" width="900" height="560" rx="8"/></clipPath>
+<linearGradient id="wramp" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fed976"/><stop offset="0.25" stop-color="#feb24c"/><stop offset="0.5" stop-color="#fd8d3c"/><stop offset="0.75" stop-color="#f03b20"/><stop offset="1" stop-color="#bd0026"/></linearGradient>
+<linearGradient id="bramp" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c6dbef"/><stop offset="0.25" stop-color="#9ecae1"/><stop offset="0.5" stop-color="#6baed6"/><stop offset="0.75" stop-color="#3182bd"/><stop offset="1" stop-color="#08519c"/></linearGradient></defs>
 <g clip-path="url(#frame)">
 <rect x="0" y="0" width="900" height="560" fill="#e7ebe1"/>
 <path d="M 700,0 C 672,120 726,240 690,360 C 662,470 716,520 706,560 L 900,560 L 900,0 Z" fill="#a9d2e6"/>
@@ -218,12 +220,17 @@
 <rect x="210.0" y="190.5" width="24.2" height="24.2" fill="#2f9fbf" fill-opacity="0.44" stroke="#2f9fbf" stroke-opacity="0.85" stroke-width="0.9"/>
 <rect x="416.3" y="426.3" width="24.2" height="24.2" fill="#2f9fbf" fill-opacity="0.44" stroke="#2f9fbf" stroke-opacity="0.85" stroke-width="0.9"/>
 <polyline points="104,438 180,441 255,435 330,440 405,436 480,439 540,437 576,438 573,405 578,375 574,345 576,321 500,324 420,318 340,322 260,319 200,323 163,321 160,290 166,255 162,225 163,203 230,206 290,200 340,204 399,203 396,175 402,150 398,130 399,114 430,117 460,112 487,114 484,140 490,165 486,185 487,203 520,206 550,201 576,203" fill="none" stroke="#6f42c1" stroke-width="2.6" stroke-opacity="0.9" stroke-linejoin="round" stroke-linecap="round"/>
-<circle cx="576" cy="321" r="26" fill="#bd0026" fill-opacity="0.4" stroke="#bd0026" stroke-opacity="0.9" stroke-width="1.5"/>
-<text x="576" y="325" text-anchor="middle" font-size="10.5" font-weight="700" fill="#7a1207">217</text>
-<circle cx="163" cy="203" r="21" fill="#f03b20" fill-opacity="0.4" stroke="#f03b20" stroke-opacity="0.9" stroke-width="1.5"/>
-<text x="163" y="207" text-anchor="middle" font-size="10.5" font-weight="700" fill="#7a1207">217</text>
-<circle cx="104" cy="438" r="16" fill="#fd8d3c" fill-opacity="0.4" stroke="#fd8d3c" stroke-opacity="0.9" stroke-width="1.5"/>
-<text x="104" y="442" text-anchor="middle" font-size="10.5" font-weight="700" fill="#7a1207">175</text>
+<!-- hotspots: WiFi filled disc, BT hollow ring (black inner+outer edge), and a both-radio split circle; numbers white with a black stroke -->
+<circle cx="285" cy="135" r="18" fill="#f03b20" fill-opacity="0.8" stroke="#000" stroke-width="1.5"/>
+<text x="285" y="139" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff" stroke="#000" stroke-width="2.2" paint-order="stroke">198</text>
+<circle cx="357" cy="135" r="14" fill="none" stroke="#000" stroke-width="5"/>
+<circle cx="357" cy="135" r="14" fill="none" stroke="#3182bd" stroke-width="3"/>
+<text x="357" y="139" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff" stroke="#000" stroke-width="2.2" paint-order="stroke">140</text>
+<path d="M 293,452 A 22,22 0 0 0 337,452 Z" fill="#f03b20"/>
+<path d="M 293,452 A 22,22 0 0 1 337,452 Z" fill="#3182bd"/>
+<circle cx="315" cy="452" r="22" fill="none" stroke="#000" stroke-width="1.5"/>
+<text x="315" y="446" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff" stroke="#000" stroke-width="2.2" paint-order="stroke">217</text>
+<text x="315" y="466" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff" stroke="#000" stroke-width="2.2" paint-order="stroke">302</text>
 <rect x="504.8" y="161.1" width="24.2" height="24.2" fill="#e23b2a" fill-opacity="0.66" stroke="#a5140a" stroke-opacity="0.95" stroke-width="1"/>
 <rect x="357.4" y="161.1" width="24.2" height="24.2" fill="#e23b2a" fill-opacity="0.66" stroke="#a5140a" stroke-opacity="0.95" stroke-width="1"/>
 <rect x="534.2" y="396.9" width="24.2" height="24.2" fill="#e23b2a" fill-opacity="0.66" stroke="#a5140a" stroke-opacity="0.95" stroke-width="1"/>
@@ -273,8 +280,8 @@
 <text x="40" y="323" font-size="11" font-style="italic" fill="#777">+1 more</text>
 <rect x="204" y="155" width="3" height="168" rx="1.5" fill="#e0e5df"/>
 <rect x="204" y="155" width="3" height="58" rx="1.5" fill="#aab3ab"/>
-<rect x="705.5" y="14.5" width="184" height="172" rx="7" fill="#000" fill-opacity="0.12"/>
-<rect x="704" y="12" width="184" height="172" rx="7" fill="#ffffff" fill-opacity="0.97" stroke="#c9cfc7"/>
+<rect x="705.5" y="14.5" width="184" height="128" rx="7" fill="#000" fill-opacity="0.12"/>
+<rect x="704" y="12" width="184" height="128" rx="7" fill="#ffffff" fill-opacity="0.97" stroke="#c9cfc7"/>
 <text x="716" y="33" font-size="13" font-weight="700" fill="#1f2a33">Layers</text>
 <text x="876" y="33" text-anchor="end" font-size="10.5" fill="#5b6b6e">Esri ●  OSM ○</text>
 <line x1="714" y1="42" x2="878" y2="42" stroke="#e4e8e1"/>
@@ -294,10 +301,6 @@
 <path d="M718,124 l2.5,3 l5,-6" fill="none" stroke="#fff" stroke-width="1.6"/>
 <line x1="740" y1="127" x2="754" y2="127" stroke="#6f42c1" stroke-width="3"/>
 <text x="762" y="130.5" font-size="12.5" fill="#24303a">Track</text>
-<rect x="716" y="139" width="13" height="13" rx="3" fill="#5aa0e0"/>
-<path d="M718,146 l2.5,3 l5,-6" fill="none" stroke="#fff" stroke-width="1.6"/>
-<circle cx="747" cy="149" r="7" fill="#f03b20" fill-opacity="0.5" stroke="#bd0026"/>
-<text x="762" y="152.5" font-size="12.5" fill="#24303a">Hotspots</text>
 <rect x="413.5" y="197.5" width="216" height="198" rx="6" fill="#000" fill-opacity="0.12"/>
 <rect x="412" y="195" width="216" height="198" rx="6" fill="#ffffff" stroke="#c9cfc7"/>
 <path d="M508,195 l9,-20 l9,20 z" fill="#ffffff" stroke="#c9cfc7"/>
@@ -313,6 +316,29 @@
 <text x="422" y="349" font-size="12" fill="#33403a">4. Green Grocer</text>
 <rect x="420" y="360" width="90" height="20" rx="5" fill="#ffffff" stroke="#16a34a"/>
 <text x="465" y="374" text-anchor="middle" font-size="11.5" font-weight="700" fill="#16a34a">&#10003; covered</text>
+<!-- hotspot switch + legend (bottom-left): WiFi/BT/Both, with density ramps and example marks -->
+<rect x="13.5" y="362.5" width="216" height="128" rx="7" fill="#000" fill-opacity="0.12"/>
+<rect x="12" y="360" width="216" height="128" rx="7" fill="#ffffff" fill-opacity="0.97" stroke="#c9cfc7"/>
+<text x="24" y="381" font-size="12.5" font-weight="700" fill="#1f2a33">Hotspots</text>
+<rect x="24" y="389" width="48" height="20" rx="4" fill="#111827"/>
+<text x="48" y="403" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">WiFi</text>
+<rect x="76" y="389" width="38" height="20" rx="4" fill="#f3f4f6" stroke="#bbb"/>
+<text x="95" y="403" text-anchor="middle" font-size="11" font-weight="700" fill="#111827">BT</text>
+<rect x="118" y="389" width="54" height="20" rx="4" fill="#f3f4f6" stroke="#bbb"/>
+<text x="145" y="403" text-anchor="middle" font-size="11" font-weight="700" fill="#111827">Both</text>
+<circle cx="31" cy="428" r="7" fill="#f03b20" stroke="#000" stroke-width="1.3"/>
+<text x="44" y="432" font-size="11.5" fill="#24303a">WiFi</text>
+<rect x="88" y="422" width="56" height="11" rx="2" fill="url(#wramp)" stroke="#bbb"/>
+<text x="150" y="431" font-size="10" fill="#5b6b6e">fewer&#8594;more</text>
+<circle cx="31" cy="452" r="7" fill="none" stroke="#000" stroke-width="4"/>
+<circle cx="31" cy="452" r="7" fill="none" stroke="#3182bd" stroke-width="2.2"/>
+<text x="44" y="456" font-size="11.5" fill="#24303a">BT</text>
+<rect x="88" y="446" width="56" height="11" rx="2" fill="url(#bramp)" stroke="#bbb"/>
+<text x="150" y="455" font-size="10" fill="#5b6b6e">fewer&#8594;more</text>
+<path d="M 24,474 A 7,7 0 0 0 38,474 Z" fill="#f03b20"/>
+<path d="M 24,474 A 7,7 0 0 1 38,474 Z" fill="#3182bd"/>
+<circle cx="31" cy="474" r="7" fill="none" stroke="#000" stroke-width="1.3"/>
+<text x="44" y="478" font-size="11.5" fill="#24303a">both &#8594; one split circle</text>
 <rect x="12" y="530" width="132" height="20" rx="10" fill="#1f2a33" fill-opacity="0.82"/>
 <text x="78" y="544" text-anchor="middle" font-size="11" fill="#fff">illustrative sample</text>
 <text x="892" y="552" text-anchor="end" font-size="10.5" fill="#40484a">Leaflet | © Esri, © OpenStreetMap contributors</text>

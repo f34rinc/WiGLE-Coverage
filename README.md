@@ -16,7 +16,7 @@ Output is a **self-contained local Leaflet map** (`.html`) you open in your brow
 
 <p align="center">
   <img src="docs/sample-map.svg" width="900"
-       alt="Sample WiGLE coverage map: teal coverage cells over a street basemap, red 'hole' cells and yellow frontier 'edge' cells, a wandering purple GPS track, graduated red hotspot circles, a Targets panel listing each hole's businesses by name with a target count and a 'sort by nearest' toggle, a layer control, and a hole popup showing its neighbour count, businesses, and map links.">
+       alt="Sample WiGLE coverage map: teal coverage cells over a street basemap, red 'hole' cells and yellow frontier 'edge' cells, a wandering purple GPS track, hotspot circles shown as red WiFi discs, blue Bluetooth rings, and a two-tone split circle where a cell is dense in both, with a WiFi/BT/Both switch and density-ramp legend, a Targets panel listing each hole's businesses by name with a target count and a 'sort by nearest' toggle, a layer control, and a hole popup showing its neighbour count, businesses, and map links.">
 </p>
 
 <p align="center"><sub><i>Illustrative sample — not real coverage data.</i></sub></p>
