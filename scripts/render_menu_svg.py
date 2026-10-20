@@ -38,9 +38,13 @@ def capture_menu():
     """The real menu output, with ANSI color on and a representative 'found' line."""
     w.C = w._C(True)                                   # force color codes
     # A real (empty) backup file so the panel's getmtime/basename work; name is the example shown.
-    bk = os.path.join(tempfile.mkdtemp(), "WiGLE Database Backup.sqlite")
+    tmp = tempfile.mkdtemp()
+    bk = os.path.join(tmp, "WiGLE Database Backup.sqlite")
+    kis = os.path.join(tmp, "Kismet-20261020-01-29-55-1.kismet")
     open(bk, "w").close()
-    w._detect_data = lambda d: (["a.kml", "b.kml", "c.kml"], [bk])     # stub: example only
+    open(kis, "w").close()
+    # stub: example only - show all three input kinds the panel can detect
+    w._detect_data = lambda d: (["a.kml", "b.kml", "c.kml"], [bk], [kis])
     st = {"data": "./data", "cell_size": 50, "min_obs": 2, "hole_threshold": 5,
           "run_gap": 30, "track_gap": 5, "mode": "all", "run": None, "date": None,
           "pois": True, "poi_source": "overture"}

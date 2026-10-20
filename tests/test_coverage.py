@@ -1149,6 +1149,18 @@ class TestKismet(unittest.TestCase):
         self.assertIn("(Kismet)", s)                 # explicit --kismet forced the Kismet source
         self.assertNotIn("using the WiGLE backup", s)
 
+    def test_detect_data_splits_kismet_from_backup(self):
+        # the menu panel must show a .kismet as its own kind, not mislabeled a "backup"
+        with tempfile.TemporaryDirectory() as d:
+            self._make_wigle_backup(os.path.join(d, "WiGLE Database Backup.sqlite"))
+            self._make_kismetdb(os.path.join(d, "run.kismet"), [(100, 40.0, -111.0)], [])
+            open(os.path.join(d, "x.kml"), "w").close()
+            cover, sq, kismet = wc._detect_data(d)
+        names = lambda fs: sorted(os.path.basename(f) for f in fs)
+        self.assertEqual(names(sq), ["WiGLE Database Backup.sqlite"])   # .kismet NOT in backups
+        self.assertEqual(names(kismet), ["run.kismet"])                 # split into its own bucket
+        self.assertIn("x.kml", names(cover))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

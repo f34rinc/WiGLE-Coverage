@@ -32,7 +32,8 @@ the script, then run it with **no arguments** for an interactive menu:
 
 ```
 python wigle_coverage.py
-#  data   | ./data   (backup: WiGLE Database Backup.sqlite)
+#  data   | ./data
+#  found  | 3 KML/CSV | backup: WiGLE Database Backup.sqlite | kismet: Kismet-20261020-...kismet
 #  grid   | cell 50 m | min-obs 2 | hole 5 | hotspot auto | radio wifi
 #  gaps   | run 30 min | track 5 min
 #  mode   | entire-DB / union

@@ -1,17 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="680" height="646" viewBox="0 0 680 646" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13">
-<rect x="0" y="0" width="680" height="646" rx="10" fill="#1c2128" stroke="#30363d"/>
-<rect x="1" y="1" width="678" height="34" rx="9" fill="#161b22"/>
-<rect x="1" y="25" width="678" height="10" fill="#161b22"/>
-<line x1="0" y1="34" x2="680" y2="34" stroke="#30363d"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="837" height="646" viewBox="0 0 837 646" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13">
+<rect x="0" y="0" width="837" height="646" rx="10" fill="#1c2128" stroke="#30363d"/>
+<rect x="1" y="1" width="835" height="34" rx="9" fill="#161b22"/>
+<rect x="1" y="25" width="835" height="10" fill="#161b22"/>
+<line x1="0" y1="34" x2="837" y2="34" stroke="#30363d"/>
 <circle cx="18" cy="17" r="6" fill="#ff5f56"/>
 <circle cx="38" cy="17" r="6" fill="#ffbd2e"/>
 <circle cx="58" cy="17" r="6" fill="#27c93f"/>
-<text x="340" y="21" text-anchor="middle" fill="#768390" font-size="12">python wigle_coverage.py</text>
+<text x="418" y="21" text-anchor="middle" fill="#768390" font-size="12">python wigle_coverage.py</text>
 <text x="20" y="63" xml:space="preserve"></text>
 <text x="20" y="83" xml:space="preserve"><tspan fill="#c9d1d9"> </tspan><tspan fill="#39c5cf" font-weight="700">WiGLE coverage</tspan></text>
 <text x="20" y="103" xml:space="preserve"><tspan fill="#768390">========================================================</tspan></text>
 <text x="20" y="123" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#e6edf3" font-weight="700">data </tspan><tspan fill="#c9d1d9"> | ./data</tspan></text>
-<text x="20" y="143" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#e6edf3" font-weight="700">found</tspan><tspan fill="#c9d1d9"> | 3 KML/CSV | backup: WiGLE Database Backup.sqlite</tspan></text>
+<text x="20" y="143" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#e6edf3" font-weight="700">found</tspan><tspan fill="#c9d1d9"> | 3 KML/CSV | backup: WiGLE Database Backup.sqlite | kismet: Kismet-20261020-01-29-55-1.kismet</tspan></text>
 <text x="20" y="163" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#e6edf3" font-weight="700">grid </tspan><tspan fill="#c9d1d9"> | cell </tspan><tspan fill="#57ab5a">50 m</tspan><tspan fill="#c9d1d9"> | min-obs 2 | hole 5 | hotspot </tspan><tspan fill="#57ab5a">auto</tspan><tspan fill="#c9d1d9"> | radio </tspan><tspan fill="#57ab5a">wifi</tspan></text>
 <text x="20" y="183" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#e6edf3" font-weight="700">gaps </tspan><tspan fill="#c9d1d9"> | run 30 min | track 5 min</tspan></text>
 <text x="20" y="203" xml:space="preserve"><tspan fill="#c9d1d9">  </tspan><tspan fill="#e6edf3" font-weight="700">mode </tspan><tspan fill="#c9d1d9"> | </tspan><tspan fill="#57ab5a">entire-DB / union</tspan></text>

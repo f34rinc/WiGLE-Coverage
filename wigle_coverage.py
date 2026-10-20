@@ -2287,25 +2287,32 @@ def run(args):
 
 
 def _detect_data(data_dir):
-    """(kml/csv files, sqlite backups) found in a folder."""
+    """(kml/csv files, WiGLE sqlite backups, Kismet .kismet captures) in a folder.
+    A .kismet is SQLite too, so it's split out of the backup bucket (else it would
+    show mislabeled as a 'backup')."""
     if not os.path.isdir(data_dir):
-        return [], []
+        return [], [], []
     inp = expand_inputs([data_dir])
-    sq = [f for f in inp if _is_sqlite(f)]
-    return [f for f in inp if f not in sq], sq
+    allsq = [f for f in inp if _is_sqlite(f)]
+    kismet = [f for f in allsq if _is_kismet(f)]
+    sq = [f for f in allsq if f not in kismet]
+    cover = [f for f in inp if f not in allsq]
+    return cover, sq, kismet
 
 
 def _menu_status(st):
-    kml, sq = _detect_data(st["data"])
-    if kml or sq:
+    kml, sq, kismet = _detect_data(st["data"])
+    if kml or sq or kismet:
         bits = []
         if kml:
             bits.append(f"{len(kml)} KML/CSV")
         if sq:
             bits.append("backup: " + os.path.basename(max(sq, key=os.path.getmtime)))
+        if kismet:
+            bits.append("kismet: " + os.path.basename(max(kismet, key=os.path.getmtime)))
         found = " | ".join(bits)
     else:
-        found = C.red + "empty - drop KML/CSV or a .sqlite backup here" + C.reset
+        found = C.red + "empty - drop KML/CSV, a .sqlite backup, or a .kismet here" + C.reset
     mode = ("run %d" % st["run"] if st["mode"] == "run"
             else "date %s" % st["date"] if st["mode"] == "date" else "entire-DB / union")
     b, r, g, m = C.b, C.reset, C.green, C.magenta
