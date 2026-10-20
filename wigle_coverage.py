@@ -101,6 +101,9 @@ HOTSPOT_PCTL   = 90     # default "hotspots" = the top (100-this)% densest cells
 # (mixes every radio, so BLE random MACs inflate counts - kept as an explicit opt-in).
 RADIO_CHOICES = ("wifi", "bt", "all")
 RADIO_TYPES   = {"wifi": ("W",), "bt": ("B", "E")}   # "all" -> None (no type filter)
+# Kismet (.kismet) classifies devices by `phyname`, not WiGLE's type codes. These
+# are the kismetdb phy names for the same --radio buckets ("all" -> None).
+KISMET_RADIO_PHYS = {"wifi": ("IEEE802.11",), "bt": ("Bluetooth", "BTLE")}
 TRACK_GAP_MIN  = 5      # minutes; a larger gap between fixes starts a new track segment
 TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one (jitter)
 RUN_GAP_MIN    = 30     # minutes of quiet that separates one run/session from the next
@@ -401,6 +404,27 @@ def _is_sqlite(path):
         return False
 
 
+def _is_kismet(path):
+    """True if a SQLite file is a Kismet kismetdb log. A .kismet is also SQLite, so
+    without this it would be mis-read as a WiGLE backup (different tables). Detect by
+    the kismetdb `KISMET` metadata table plus `packets`. Opened read-only."""
+    if not _is_sqlite(path):
+        return False
+    import sqlite3
+    import urllib.request
+    uri = "file:" + urllib.request.pathname2url(os.path.abspath(path)) + "?mode=ro"
+    try:
+        con = sqlite3.connect(uri, uri=True)
+        try:
+            names = {r[0] for r in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return False
+    return "KISMET" in names and "packets" in names
+
+
 def expand_inputs(paths):
     """Turn dropped args (files, folders, globs) into a flat list of input files -
     KML/CSV for coverage and SQLite backups for track/run views. A folder is
@@ -408,7 +432,7 @@ def expand_inputs(paths):
     out = []
     for p in paths:
         if os.path.isdir(p):
-            for pat in ("*.kml", "*.csv", "*.sqlite", "*.db", "*Database Backup*"):
+            for pat in ("*.kml", "*.csv", "*.sqlite", "*.db", "*Database Backup*", "*.kismet"):
                 out += glob.glob(os.path.join(p, pat))
         elif any(ch in p for ch in "*?[]"):
             out += glob.glob(p)
@@ -499,6 +523,11 @@ def _radio_types(radio):
     return RADIO_TYPES.get(radio)
 
 
+def _kismet_radio_phys(radio):
+    """kismetdb `phyname`s for a --radio name, or None for 'all' (no filter)."""
+    return KISMET_RADIO_PHYS.get(radio)
+
+
 def parse_sqlite_networks(path, types=None):
     """Network locations from a WiGLE SQLite backup's `network` table (best-fix lat/lon).
     Returns [(lat, lon), ...] - the actual APs, for counting "networks captured" per cell
@@ -517,6 +546,50 @@ def parse_sqlite_networks(path, types=None):
         params = tuple(types)
     try:
         rows = con.execute(f"SELECT bestlat, bestlon FROM network WHERE {where}", params).fetchall()
+    finally:
+        con.close()
+    return [(float(la), float(lo)) for (la, lo) in rows]
+
+
+# ---- Kismet kismetdb readers (a .kismet capture: track + networks) -----------
+def parse_kismet_track(path):
+    """Timestamped GPS fixes from a Kismet kismetdb's `packets` table, sorted by
+    time (epoch ms). Returns [(time_ms, lat, lon), ...]. Kismet stamps each packet
+    with the live GPS fix, so we thin to one averaged point per second (every packet
+    in a second shares ~one fix). Read-only; skips null-island / out-of-range / no-fix
+    rows. kismet `ts_sec` is epoch SECONDS -> *1000 for ms."""
+    import sqlite3
+    import urllib.request
+    uri = "file:" + urllib.request.pathname2url(os.path.abspath(path)) + "?mode=ro"
+    con = sqlite3.connect(uri, uri=True)
+    try:
+        rows = con.execute(
+            "SELECT ts_sec, AVG(lat), AVG(lon) FROM packets "
+            "WHERE lat BETWEEN -90 AND 90 AND lon BETWEEN -180 AND 180 "
+            "AND NOT (lat = 0 AND lon = 0) GROUP BY ts_sec ORDER BY ts_sec").fetchall()
+    finally:
+        con.close()
+    return [(int(ts) * 1000, float(la), float(lo)) for (ts, la, lo) in rows]
+
+
+def parse_kismet_networks(path, phys=None):
+    """Device locations from a Kismet kismetdb's `devices` table (`avg_lat`/`avg_lon`)
+    - the APs/BT seen, for the per-cell network-density (hotspot) metric, distinct from
+    the GPS track in `packets`. Returns [(lat, lon), ...]. Read-only. `phys` is a tuple
+    of kismet `phyname`s to keep (e.g. ("IEEE802.11",) for WiFi); None keeps every radio."""
+    import sqlite3
+    import urllib.request
+    uri = "file:" + urllib.request.pathname2url(os.path.abspath(path)) + "?mode=ro"
+    con = sqlite3.connect(uri, uri=True)
+    where = ("avg_lat BETWEEN -90 AND 90 AND avg_lon BETWEEN -180 AND 180 "
+             "AND NOT (avg_lat = 0 AND avg_lon = 0)")
+    params = ()
+    if phys:
+        where = f"phyname IN ({','.join('?' * len(phys))}) AND " + where
+        params = tuple(phys)
+    try:
+        rows = con.execute(
+            f"SELECT avg_lat, avg_lon FROM devices WHERE {where}", params).fetchall()
     finally:
         con.close()
     return [(float(la), float(lo)) for (la, lo) in rows]
@@ -1768,6 +1841,9 @@ def parse_args():
     g.add_argument("--track", "--backup", "--db", dest="track", metavar="BACKUP",
                    help="a WiGLE .sqlite backup, or a .gpx - adds your walked path (a .gpx on "
                         "its own maps just the track); the .sqlite is also the source for run views")
+    g.add_argument("--kismet", metavar="FILE",
+                   help="a Kismet .kismet capture - maps that run's coverage + walked path + AP/BT "
+                        "density straight from the kismetdb (a dropped/positional .kismet also works)")
     g.add_argument("--data", metavar="DIR",
                    help=f"folder to read when no path is given (default: {DATA_DIR})")
 
@@ -1849,7 +1925,7 @@ def run(args):
     poi_secs = 0.0                     # time spent in the OSM/Overpass lookup (usually the bulk)
     # Default to the ./data folder when nothing was passed.
     paths = list(args.paths)
-    if not paths and not args.track:
+    if not paths and not args.track and not getattr(args, "kismet", None):
         d = getattr(args, "data", None) or DATA_DIR
         if os.path.isdir(d):
             paths = [d]
@@ -1857,11 +1933,17 @@ def run(args):
     inputs = expand_inputs(paths)
     sqlite_files = [f for f in inputs if _is_sqlite(f)]
     cover_files = [f for f in inputs if f not in sqlite_files]
+    # kismetdb logs are SQLite too but have different tables -> pull them out of the
+    # WiGLE-backup bucket so they aren't read against the WiGLE schema.
+    kismet_files = [f for f in sqlite_files if _is_kismet(f)]
+    sqlite_files = [f for f in sqlite_files if f not in kismet_files]
     # A GPX (via --track or a positional path) is a TRACK source only - a GPS path with
     # no networks, so it can draw your route but never coverage.
     gpx_track = None
     if args.track and _is_gpx(args.track):
         gpx_track, sqlite_path = args.track, None
+    elif args.track and _is_kismet(args.track):
+        sqlite_path = None                      # a .kismet via --track is a Kismet source
     else:
         sqlite_path = args.track
     gpx_pos = [f for f in cover_files if _is_gpx(f)]
@@ -1873,6 +1955,15 @@ def run(args):
         sqlite_path = sqlite_files[0]
         if len(sqlite_files) > 1:
             print(f"using newest SQLite backup: {os.path.basename(sqlite_path)}")
+    # Kismet source: explicit --kismet, a .kismet handed to --track, or a dropped one.
+    kismet_path = args.kismet if getattr(args, "kismet", None) else None
+    if not kismet_path and args.track and _is_kismet(args.track):
+        kismet_path = args.track
+    if not kismet_path and kismet_files:
+        kismet_files.sort(key=os.path.getmtime, reverse=True)
+        kismet_path = kismet_files[0]
+        if len(kismet_files) > 1:
+            print(f"using newest Kismet log: {os.path.basename(kismet_path)}")
 
     # Track-only: a GPX handed in with no coverage source at all -> just draw the path.
     if gpx_track and not cover_files and not sqlite_path \
@@ -1955,6 +2046,12 @@ def run(args):
                 track_fixes, err = _load_fixes(sqlite_path)
                 if err:
                     print(f"  !! couldn't read track ({err}); rendering without it")
+            elif kismet_path:
+                print(f"reading track from {os.path.basename(kismet_path)} (Kismet)...")
+                try:
+                    track_fixes = parse_kismet_track(kismet_path)
+                except Exception as err:
+                    print(f"  !! couldn't read Kismet track ({err}); rendering without it")
         elif sqlite_path:                           # entire-DB view straight from the backup
             print(f"entire-DB view from {os.path.basename(sqlite_path)}...")
             track_fixes, err = _load_fixes(sqlite_path)
@@ -1963,6 +2060,15 @@ def run(args):
                 return None
             points = [(la, lo) for (_, la, lo) in track_fixes]
             base_dir = os.path.dirname(os.path.abspath(sqlite_path))
+        elif kismet_path:                           # entire-file view from a Kismet capture
+            print(f"entire-file view from {os.path.basename(kismet_path)} (Kismet)...")
+            try:
+                track_fixes = parse_kismet_track(kismet_path)
+            except Exception as err:
+                print(f"couldn't read Kismet log: {err}")
+                return None
+            points = [(la, lo) for (_, la, lo) in track_fixes]
+            base_dir = os.path.dirname(os.path.abspath(kismet_path))
         else:
             print("No input. Drag in a WiGLE KML/CSV or a .sqlite backup "
                   '(or pass paths / --track "<backup>").')
@@ -1987,9 +2093,18 @@ def run(args):
     # fixes. KML/CSV points already ARE networks; from a SQLite backup, read the `network`
     # table (or, for a run/date view, the `location` observations in the window). --radio
     # filters by radio: WiFi (default), Bluetooth (its own layer), or both.
-    def net_counts_for(types):
-        """Per-cell network counts for one radio (a `types` tuple), or None when the active
-        source has no radio type (KML/CSV) so the caller can fall back to one combined layer."""
+    def net_counts_for(radio_name):
+        """Per-cell network counts for one radio ('wifi'/'bt'), or None when the active
+        source carries no radio type (KML/CSV) so the caller folds into one combined layer."""
+        if kismet_path:                              # Kismet: density from `devices` by phyname
+            try:
+                nets = [(la, lo) for (la, lo)
+                        in parse_kismet_networks(kismet_path, _kismet_radio_phys(radio_name))
+                        if -90 <= la <= 90 and -180 <= lo <= 180 and not (la == 0 and lo == 0)]
+                return build_coverage(nets, dlat, dlon)
+            except Exception:
+                return coverage
+        types = _radio_types(radio_name)
         if (args.run or args.date) and sqlite_path and track_fixes:
             times = [t for (t, _, _) in track_fixes]
             try:
@@ -2018,8 +2133,8 @@ def run(args):
         return (hotspot_cells(counts, thr) if thr and thr > 0 else []), thr
 
     radio = getattr(args, "radio", "wifi") or "wifi"
-    wifi_counts = net_counts_for(_radio_types("wifi")) if radio in ("wifi", "all") else None
-    bt_counts = net_counts_for(_radio_types("bt")) if radio in ("bt", "all") else None
+    wifi_counts = net_counts_for("wifi") if radio in ("wifi", "all") else None
+    bt_counts = net_counts_for("bt") if radio in ("bt", "all") else None
     if ((radio in ("wifi", "all") and wifi_counts is None)
             or (radio in ("bt", "all") and bt_counts is None)):
         # KML/CSV has no radio type: can't split - fall back to one combined layer.

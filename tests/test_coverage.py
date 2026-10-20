@@ -1007,5 +1007,98 @@ class TestRunNetworkCounts(unittest.TestCase):
         self.assertEqual(len(counts), 2)               # two occupied cells
 
 
+class TestKismet(unittest.TestCase):
+    """Reading a Kismet .kismet (kismetdb) capture: discriminator + the two readers
+    + the --kismet arg + an end-to-end render. Coordinates are fabricated."""
+
+    def _make_kismetdb(self, path, packets, devices):
+        import sqlite3
+        con = sqlite3.connect(path)
+        con.execute("CREATE TABLE KISMET (kismet_version TEXT, db_version INT)")
+        con.execute("INSERT INTO KISMET VALUES ('2022', 1)")
+        con.execute("CREATE TABLE packets (ts_sec INT, lat REAL, lon REAL)")
+        con.executemany("INSERT INTO packets (ts_sec,lat,lon) VALUES (?,?,?)", packets)
+        con.execute("CREATE TABLE devices (phyname TEXT, type TEXT, avg_lat REAL, avg_lon REAL)")
+        con.executemany("INSERT INTO devices (phyname,type,avg_lat,avg_lon) VALUES (?,?,?,?)",
+                        devices)
+        con.commit()
+        con.close()
+
+    def _make_wigle_sqlite(self, path):
+        import sqlite3
+        con = sqlite3.connect(path)
+        con.execute("CREATE TABLE location (time INT, lat REAL, lon REAL, bssid TEXT)")
+        con.execute("CREATE TABLE network (bssid TEXT, type TEXT, bestlat REAL, bestlon REAL)")
+        con.commit()
+        con.close()
+
+    def test_is_kismet_discriminates_from_wigle(self):
+        with tempfile.TemporaryDirectory() as d:
+            kdb = os.path.join(d, "run.kismet")
+            self._make_kismetdb(kdb, [(100, 40.0, -111.0)], [])
+            wdb = os.path.join(d, "backup.sqlite")
+            self._make_wigle_sqlite(wdb)
+            self.assertTrue(wc._is_kismet(kdb))    # has KISMET + packets tables
+            self.assertFalse(wc._is_kismet(wdb))   # a WiGLE backup is NOT a kismetdb
+            self.assertTrue(wc._is_sqlite(kdb))    # ...but both are real SQLite (the trap)
+
+    def test_parse_kismet_track_thins_per_second_and_scales_ms(self):
+        with tempfile.TemporaryDirectory() as d:
+            kdb = os.path.join(d, "run.kismet")
+            self._make_kismetdb(kdb, [
+                (100, 40.0000, -111.0000), (100, 40.0002, -111.0002),  # same sec -> 1 pt
+                (101, 40.0010, -111.0010),
+                (102, 0.0, 0.0),                                        # null island -> dropped
+            ], [])
+            fixes = wc.parse_kismet_track(kdb)
+        self.assertEqual([f[0] for f in fixes], [100_000, 101_000])    # 1/sec, ts_sec*1000, ordered
+        self.assertAlmostEqual(fixes[0][1], 40.0001, places=4)         # averaged within the second
+
+    def test_parse_kismet_networks_phy_filter(self):
+        with tempfile.TemporaryDirectory() as d:
+            kdb = os.path.join(d, "run.kismet")
+            self._make_kismetdb(kdb, [], [
+                ("IEEE802.11", "Wi-Fi AP", 40.0, -111.0),
+                ("IEEE802.11", "Wi-Fi Ad-Hoc", 40.1, -111.1),
+                ("BTLE", "BTLE", 41.0, -112.0),
+                ("Bluetooth", "BR/EDR", 42.0, -113.0),
+                ("IEEE802.11", "Wi-Fi AP", 0.0, 0.0),                  # null island -> dropped
+            ])
+            wifi = wc.parse_kismet_networks(kdb, wc._kismet_radio_phys("wifi"))
+            bt = sorted(wc.parse_kismet_networks(kdb, wc._kismet_radio_phys("bt")))
+            alln = wc.parse_kismet_networks(kdb, None)
+        self.assertEqual(sorted(wifi), [(40.0, -111.0), (40.1, -111.1)])  # IEEE802.11 only, 0,0 gone
+        self.assertEqual(bt, [(41.0, -112.0), (42.0, -113.0)])            # BTLE + Bluetooth
+        self.assertEqual(len(alln), 4)                                    # every valid radio
+
+    def test_kismet_arg_parses(self):
+        old = sys.argv
+        sys.argv = ["wc", "--kismet", "run.kismet"]
+        try:
+            args = wc.parse_args()
+        finally:
+            sys.argv = old
+        self.assertEqual(args.kismet, "run.kismet")
+
+    def test_run_end_to_end_from_kismet(self):
+        with tempfile.TemporaryDirectory() as d:
+            kdb = os.path.join(d, "run.kismet")
+            pkts = [(100 + i, 40.0 + i * 0.0006, -111.0 + i * 0.0006) for i in range(8)]
+            devs = [("IEEE802.11", "Wi-Fi AP", 40.0012, -111.0012),
+                    ("IEEE802.11", "Wi-Fi AP", 40.0030, -111.0030)]
+            self._make_kismetdb(kdb, pkts, devs)
+            out = os.path.join(d, "cov.html")
+            old = sys.argv
+            sys.argv = ["wc", "--kismet", kdb, "--no-pois", "--no-open", "--out", out]
+            try:
+                wc.run(wc.parse_args())
+            finally:
+                sys.argv = old
+            self.assertTrue(os.path.exists(out))                 # map rendered from the .kismet
+            html = open(out, encoding="utf-8").read().lower()
+        self.assertIn("<html", html)
+        self.assertIn("leaflet", html)                           # Leaflet inlined = real map
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

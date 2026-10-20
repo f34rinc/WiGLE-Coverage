@@ -140,6 +140,7 @@ The full flag list (grouped as `python wigle_coverage.py --help` prints them):
 | `paths …` | KML/CSV, a `.sqlite` backup, a folder, or globs; empty = the `./data` folder |
 | `--track` / `--backup` / `--db BACKUP` | a WiGLE `.sqlite` backup **or a `.gpx`** — adds your path (a `.gpx` alone maps just the track); the `.sqlite` also powers the run views |
 | `--data DIR` | folder to read when no path is given (default: `./data`) |
+| `--kismet FILE` | a **Kismet `.kismet` capture** - maps that session's coverage + walked path + AP/BT density straight from the kismetdb (a dropped or positional `.kismet` also works) |
 
 **Views — which slice to map**
 
