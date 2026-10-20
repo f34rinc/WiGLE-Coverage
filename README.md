@@ -51,10 +51,11 @@ your densest cells. `-i` / `--menu` forces the menu even with other flags;
 `--data DIR` points at a different folder. Everything also works as one-shot CLI flags for
 scripting (full list under [Command line](#use-it)).
 
-## Best input: the WiGLE "Database Backup" (`.sqlite`)
+## Best input for whole-history coverage: the WiGLE "Database Backup" (`.sqlite`)
 
-**Export the entire database.** The `.sqlite` backup is the single best file to feed this
-tool, because it carries everything in one place:
+**Export the entire database.** For a **whole-history** map, the `.sqlite` backup is the single
+best file to feed this tool: it's **cumulative** — every walk you've ever uploaded from that
+phone — and it carries everything in one place:
 
 - **coverage** — every network's location (where you were),
 - **your actual track path** — the timestamped GPS breadcrumb (a black line by default, recolorable in the map), and
@@ -63,6 +64,12 @@ tool, because it carries everything in one place:
 A KML/CSV export has *none* of the track or timing — just network locations — so a backup
 alone does more than a whole folder of KMLs. Drop one in `data/` (or pass it) and you get
 coverage **and** path **and** run-slicing from that one file.
+
+> **A Kismet `.kismet` is a first-class input too — but it's one walk, not your history.** A
+> capture holds a **single session**; the WiGLE backup is the accumulation of *all* your
+> uploaded walks, which is what makes it the source for whole-history coverage and the run
+> views. Mapping one fresh wardrive — especially a Kismet one — is what `--kismet` is for; see
+> [From a Kismet capture](#from-a-kismet-capture-kismet) below.
 
 ### How to export it from the WiGLE app (Android)
 
