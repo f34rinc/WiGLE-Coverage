@@ -1964,6 +1964,17 @@ def run(args):
         kismet_path = kismet_files[0]
         if len(kismet_files) > 1:
             print(f"using newest Kismet log: {os.path.basename(kismet_path)}")
+    # One backup-like source drives coverage+track+density - never a mix of the two.
+    # An explicitly chosen Kismet (--kismet, or a .kismet via --track) wins; otherwise
+    # a WiGLE backup wins and a .kismet dropped in the same folder is skipped (use
+    # --kismet to map it instead).
+    if kismet_path and sqlite_path:
+        if getattr(args, "kismet", None) or (args.track and _is_kismet(args.track)):
+            sqlite_path = None
+        else:
+            kismet_path = None
+            print("note: found a .kismet too - using the WiGLE backup "
+                  "(pass --kismet to map the Kismet capture instead)")
 
     # Track-only: a GPX handed in with no coverage source at all -> just draw the path.
     if gpx_track and not cover_files and not sqlite_path \
@@ -2096,7 +2107,7 @@ def run(args):
     def net_counts_for(radio_name):
         """Per-cell network counts for one radio ('wifi'/'bt'), or None when the active
         source carries no radio type (KML/CSV) so the caller folds into one combined layer."""
-        if kismet_path:                              # Kismet: density from `devices` by phyname
+        if kismet_path and not cover_files:          # Kismet: density from `devices` by phyname
             try:
                 nets = [(la, lo) for (la, lo)
                         in parse_kismet_networks(kismet_path, _kismet_radio_phys(radio_name))

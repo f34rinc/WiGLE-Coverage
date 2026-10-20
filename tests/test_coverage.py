@@ -1095,9 +1095,59 @@ class TestKismet(unittest.TestCase):
             finally:
                 sys.argv = old
             self.assertTrue(os.path.exists(out))                 # map rendered from the .kismet
-            html = open(out, encoding="utf-8").read().lower()
+            with open(out, encoding="utf-8") as fh:
+                html = fh.read().lower()
         self.assertIn("<html", html)
         self.assertIn("leaflet", html)                           # Leaflet inlined = real map
+
+    def _make_wigle_backup(self, path):
+        import sqlite3
+        con = sqlite3.connect(path)
+        con.execute("CREATE TABLE location (time INT, lat REAL, lon REAL, bssid TEXT)")
+        con.execute("CREATE TABLE network (bssid TEXT, type TEXT, bestlat REAL, bestlon REAL)")
+        con.executemany("INSERT INTO location (time,lat,lon,bssid) VALUES (?,?,?,?)",
+                        [(1000 + i, 50.0 + i * 0.0006, 8.0 + i * 0.0006, f"AA{i}") for i in range(6)])
+        con.executemany("INSERT INTO network (bssid,type,bestlat,bestlon) VALUES (?,?,?,?)",
+                        [("AA0", "W", 50.0, 8.0), ("AA1", "W", 50.001, 8.001)])
+        con.commit()
+        con.close()
+
+    def _both_in_folder(self, d):
+        # a WiGLE backup and a Kismet capture at DIFFERENT locations in one folder
+        self._make_wigle_backup(os.path.join(d, "WiGLE Database Backup.sqlite"))
+        kdb = os.path.join(d, "run.kismet")
+        self._make_kismetdb(kdb, [(200 + i, 40.0 + i * 0.0006, -111.0 + i * 0.0006) for i in range(6)],
+                            [("IEEE802.11", "Wi-Fi AP", 40.0, -111.0)])
+        return kdb
+
+    def _run_capture(self, argv):
+        import io, contextlib
+        buf, old = io.StringIO(), sys.argv
+        sys.argv = ["wc"] + argv
+        try:
+            with contextlib.redirect_stdout(buf):
+                wc.run(wc.parse_args())
+        finally:
+            sys.argv = old
+        return buf.getvalue()
+
+    def test_both_in_folder_prefers_wigle_backup(self):
+        # dropping BOTH a .sqlite and a .kismet -> exactly one source wins (the backup),
+        # never a mix; a note points to --kismet for the other
+        with tempfile.TemporaryDirectory() as d:
+            self._both_in_folder(d)
+            s = self._run_capture([d, "--no-pois", "--no-open", "--out", os.path.join(d, "m.html")])
+        self.assertIn("using the WiGLE backup", s)   # note: the .kismet was skipped
+        self.assertIn("entire-DB view", s)           # the .sqlite drove coverage+track
+        self.assertNotIn("(Kismet)", s)
+
+    def test_kismet_flag_overrides_a_dropped_backup(self):
+        with tempfile.TemporaryDirectory() as d:
+            kdb = self._both_in_folder(d)
+            s = self._run_capture([d, "--kismet", kdb, "--no-pois", "--no-open",
+                                   "--out", os.path.join(d, "m.html")])
+        self.assertIn("(Kismet)", s)                 # explicit --kismet forced the Kismet source
+        self.assertNotIn("using the WiGLE backup", s)
 
 
 if __name__ == "__main__":
