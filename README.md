@@ -7,7 +7,7 @@
 ![Dependencies: stdlib + optional DuckDB](https://img.shields.io/badge/deps-stdlib%20%2B%20optional%20DuckDB-brightgreen.svg)
 ![POIs: Overture · OSM](https://img.shields.io/badge/POIs-Overture%20%C2%B7%20OSM-orange.svg)
 
-Turn your WiGLE exports into a **coverage map** that shows where you've walked and
+Turn your WiGLE exports — or a **Kismet** `.kismet` capture — into a **coverage map** that shows where you've walked and
 — more usefully — **recommends where you haven't**: the blank cells on the frontier
 of your footprint (walk outward) and the holes inside it (streets you skipped). Built
 for planning the next wardrive so each outing lands on ground that's new to you.
@@ -19,7 +19,7 @@ Output is a **self-contained local Leaflet map** (`.html`) you open in your brow
        alt="Sample WiGLE coverage map: teal coverage cells over a street basemap, red 'hole' cells and yellow frontier 'edge' cells, a wandering purple GPS track, hotspot circles shown as red WiFi discs, blue Bluetooth rings, and a two-tone split circle where a cell is dense in both, with a WiFi/BT/Both switch and density-ramp legend, a Targets panel listing each hole's businesses by name with a target count and a 'sort by nearest' toggle, a layer control, and a hole popup showing its neighbour count, businesses, and map links.">
 </p>
 
-<p align="center"><sub><i>Illustrative sample — not real coverage data.</i></sub></p>
+<p align="center"><sub><i>Illustrative sample — not real coverage data; the same map renders from a WiGLE backup, KML/CSV, or a Kismet <code>.kismet</code> capture.</i></sub></p>
 
 > *Independent hobby project — **not affiliated with, endorsed by, or connected to
 > [WiGLE](https://wigle.net)**. "WiGLE" is a trademark of its owner, used here only to
@@ -27,7 +27,7 @@ Output is a **self-contained local Leaflet map** (`.html`) you open in your brow
 
 ## Quick start (no arguments)
 
-Drop your WiGLE **`.sqlite` backup** (or KML/CSV exports) into the **`data/`** folder beside
+Drop your WiGLE **`.sqlite` backup**, a **Kismet `.kismet` capture**, or KML/CSV exports into the **`data/`** folder beside
 the script, then run it with **no arguments** for an interactive menu:
 
 ```
@@ -99,6 +99,23 @@ unions them for coverage like any other WiGLE CSV.
 > *WiGLE-Vault is an independent third-party project, not affiliated with this tool or with
 > WiGLE. You supply your own API token, and it downloads only your own data.*
 
+## From a Kismet capture (`.kismet`)
+
+Wardriving with **[Kismet](https://www.kismetwireless.net/)**? Point the tool straight at a
+`.kismet` log — no WiGLE account, upload, or processing in the loop:
+
+```
+python wigle_coverage.py --kismet "Kismet-20261020-01-29-55-1.kismet"
+```
+
+It maps that session's **coverage + walked path** (from the capture's per-packet GPS trail)
+and **AP / Bluetooth density** (`--radio wifi|bt|all`, read from the kismetdb's devices),
+exactly like a WiGLE backup — the whole map renders from the one file. A `.kismet` dropped in
+`data/` or onto the script is auto-detected too (it's SQLite, but the tool tells it apart from a
+WiGLE backup). One capture is **one session** (one walk); for whole-history coverage use your
+WiGLE backup. If both a backup and a `.kismet` are present, the backup wins unless you pass
+`--kismet` — the two databases are never merged.
+
 ## Use it
 
 <p align="center">
@@ -117,7 +134,7 @@ so you always see the live state. **`help`** shows the compact command list, **`
 full per-flag reference — **`help <cmd>`** the detail for just one — and **`q`** quits.
 
 **Drag-and-drop (Windows):** drop one or more `.kml` / WiGLE `.csv` files — or the
-whole `WiGLE data` folder — onto `wigle_coverage.py`. It unions everything, builds
+whole `WiGLE data` folder — or a Kismet **`.kismet`** capture — onto `wigle_coverage.py`. It unions everything, builds
 the map, and opens it in your browser.
 
 > Coverage is most meaningful from the **union of all your exports**, so dragging the
@@ -129,6 +146,7 @@ the map, and opens it in your browser.
 
 ```
 python wigle_coverage.py "C:\path\to\WiGLE data" --cell-size 50 --min-obs 2 --out map.html
+python wigle_coverage.py --kismet "Kismet-20261020-01-29-55-1.kismet"   # map a Kismet wardrive
 ```
 
 The full flag list (grouped as `python wigle_coverage.py --help` prints them):
