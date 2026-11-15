@@ -576,6 +576,24 @@ class TestLeafletInline(unittest.TestCase):
         self.assertIn('href="geo:', html)              # Pin -> default maps app, no secure context
         self.assertIn("google.com/maps/dir/", html)    # Directions -> walking route
 
+    def test_map_uses_canvas_and_toggleable_layers(self):
+        # with thousands of shapes the SVG renderer makes pan/zoom crawl; the canvas
+        # renderer draws them all to one <canvas>. Coverage/holes/edges also move into
+        # the layer control so the heavy edge layer can be switched off.
+        import tempfile
+        dlat, dlon = wc.meters_to_deg(50, LAT)
+        recs = [{"cell": (1, 1), "label": "hole", "covered_neighbors": 5},
+                {"cell": (3, 3), "label": "edge", "covered_neighbors": 1}]
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "m.html")
+            wc.render_html({(0, 0): 3, (0, 1): 3}, recs, dlat, dlon, 2, out)
+            with open(out, encoding="utf-8") as fh:
+                html = fh.read()
+        self.assertIn("L.map('map', {preferCanvas:true})", html)   # canvas renderer: smooth with many shapes
+        self.assertIn("addOverlay(covGroup", html)      # coverage is a toggleable overlay
+        self.assertIn("addOverlay(holeGroup", html)     # holes toggleable...
+        self.assertIn("addOverlay(edgeGroup", html)     # ...separately from the heavy edges layer
+
 
 class TestHotspots(unittest.TestCase):
     def test_percentile_nearest_rank(self):

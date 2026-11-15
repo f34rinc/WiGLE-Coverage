@@ -1472,7 +1472,9 @@ __LEAFLET_JS__
 </style></head><body><div id="map"></div>
 <script>
 const D = __DATA__;
-const map = L.map('map');
+// canvas renderer: with thousands of coverage/edge rectangles the default SVG renderer
+// (one DOM node per shape) makes pan/zoom crawl; canvas draws them all to one <canvas>.
+const map = L.map('map', {preferCanvas:true});
 // OSM's own servers block file:// requests and CARTO now nags without an API key,
 // so use Esri's keyless, nag-free basemaps (fine from a local file).
 const esri = (svc, mz) => L.tileLayer(
@@ -1516,12 +1518,13 @@ function navlinks(la,lo){ const q=la.toFixed(6)+','+lo.toFixed(6);
     + '<a class="nav" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination='+q+'&travelmode=walking">&#129517; Directions</a>'
     + '</div>'; }
 
-// coverage (where you've been)
-D.covered.forEach(([r,c,n])=>{
+// coverage (where you've been) - a toggleable layer so it can be switched off
+const covLayers = D.covered.map(([r,c,n])=>{
   const b=bounds(r,c), ct=center(b);
-  L.rectangle(b, {stroke:false, fillColor:covColor(n), fillOpacity:.55})
-   .bindPopup('Covered &middot; '+n+' networks<br>'+maplink(ct[0],ct[1])).addTo(map);
+  return L.rectangle(b, {stroke:false, fillColor:covColor(n), fillOpacity:.55})
+   .bindPopup('Covered &middot; '+n+' networks<br>'+maplink(ct[0],ct[1]));
 });
+const covGroup = L.layerGroup(covLayers).addTo(map);
 // recommendations (where to go next)
 function escapeHtml(s){ return String(s).replace(/[&<>"]/g,
   c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -1529,6 +1532,7 @@ const RC = {hole:'#dc2626', edge:'#f59e0b'};
 const targetHoles = [];   // holes that have named businesses -> feeds the target panel
 const holeReg = {};       // id -> {layer, center, covered} for EVERY hole (cover/reset, incl. no-POI)
 let holeId = 0;
+const holeLayers = [], edgeLayers = [];   // split so the heavy edge layer can be toggled off
 D.recs.forEach(([r,c,label,nb,pois,more])=>{
   const b=bounds(r,c), ct=center(b);
   more = more||0;
@@ -1546,7 +1550,8 @@ D.recs.forEach(([r,c,label,nb,pois,more])=>{
   if (isHole)                                        // every hole (POI or not) is checkable from its popup
     html += '<button class="pcov" onclick="coverHole('+id+')" title="Mark this cell covered: dims it green and drops it from the list (the panel reset button restores it)">&#10003; covered</button>';
   const rect = L.rectangle(b, {color:RC[label], weight:2, fillColor:RC[label], fillOpacity:.35})
-   .bindPopup(html, {maxWidth:340}).addTo(map);
+   .bindPopup(html, {maxWidth:340});
+  (isHole ? holeLayers : edgeLayers).push(rect);
   if (isHole){
     holeReg[id] = {layer:rect, center:ct, covered:false};
     if (pois && pois.length){
@@ -1555,6 +1560,12 @@ D.recs.forEach(([r,c,label,nb,pois,more])=>{
     }
   }
 });
+// group recs so the heavy edge layer (often thousands) can be switched off; all default on
+const holeGroup = L.layerGroup(holeLayers).addTo(map);
+const edgeGroup = L.layerGroup(edgeLayers).addTo(map);
+layerCtl.addOverlay(covGroup,  'Coverage ('+covLayers.length+')');
+layerCtl.addOverlay(holeGroup, 'Holes ('+holeLayers.length+')');
+layerCtl.addOverlay(edgeGroup, 'Edges ('+edgeLayers.length+')');
 
 // clicking a hole cell re-sorts the Targets panel by distance FROM that cell (nearest
 // first, the clicked one on top + flashed) - so you can plan the hop to the next-closest gap
