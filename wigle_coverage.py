@@ -96,6 +96,9 @@ CELL_SIZE_M   = 50      # grid cell edge in metres (~half a block; near the GPS 
 MIN_OBS       = 2       # APs in a cell before it counts as "covered" (filters strays)
 HOLE_THRESHOLD = 5      # covered 8-neighbours at/above this => "hole", else "edge"
 HOTSPOT_PCTL   = 90     # default "hotspots" = the top (100-this)% densest cells (adaptive)
+HOTSPOT_MAX    = 50     # ...but never flood the map: cap auto-hotspots to the N densest cells
+                        # (a saturated collection's 90th percentile can still be hundreds of
+                        # cells; this keeps the marks to the real standouts). 0 = no cap.
 # Hotspot radio filter. WiGLE tags each `network` row by type: W=WiFi, B=Bluetooth
 # classic, E=BLE, G/L/C/D=cell/other. "bt" folds classic + BLE; "all" = no filter
 # (mixes every radio, so BLE random MACs inflate counts - kept as an explicit opt-in).
@@ -652,6 +655,24 @@ def hotspot_cells(counts, threshold):
     hs = [[r, c, n] for (r, c), n in counts.items() if n >= threshold]
     hs.sort(key=lambda x: x[2])          # ascending -> big ones added last -> on top
     return hs
+
+
+def hotspot_threshold(counts, hs_arg, pctl=HOTSPOT_PCTL, cap=HOTSPOT_MAX):
+    """The network-count threshold that marks a cell a 'hotspot'.
+    - hs_arg not None: used verbatim (the explicit --hotspot N / menu override, incl. 0=off).
+    - hs_arg None (auto): the pctl-th percentile of per-cell counts, floored at 3, THEN raised
+      so at most ~`cap` densest cells qualify. The cap only bites on a saturated map where the
+      percentile alone would mark hundreds of cells; a sparse map's percentile is already below
+      it and is left untouched. cap=0 disables the cap. Returns 0 for an empty count map."""
+    if not counts:
+        return 0
+    if hs_arg is not None:
+        return hs_arg
+    vals = sorted(counts.values())
+    thr = max(3, _percentile(vals, pctl))
+    if cap and len(vals) > cap:
+        thr = max(thr, vals[-cap])       # the cap-th largest count -> only the N densest pass
+    return thr
 
 
 def _track_dist_m(a, b):
@@ -1934,7 +1955,11 @@ def parse_args():
                    help=f"covered neighbours for a hole vs an edge (default {HOLE_THRESHOLD})")
     g.add_argument("--hotspot", type=int, default=None, metavar="N",
                    help="show WiGLE-style circles on cells with >= N networks captured "
-                        f"(default: adaptive, your top {100 - HOTSPOT_PCTL}%% densest; 0 = off)")
+                        f"(default: adaptive - top {100 - HOTSPOT_PCTL}%% densest, capped to the "
+                        f"~{HOTSPOT_MAX} densest cells; 0 = off)")
+    g.add_argument("--hotspot-max", type=int, default=HOTSPOT_MAX, metavar="N",
+                   help=f"cap adaptive hotspots to the N densest cells so a saturated map isn't "
+                        f"flooded (default {HOTSPOT_MAX}; 0 = no cap; ignored when --hotspot is set)")
     g.add_argument("--radio", choices=RADIO_CHOICES, default="wifi", metavar="R",
                    help="which radio the hotspots count: 'wifi' (default), 'bt' (Bluetooth "
                         "classic + BLE, its own blue layer), or 'all' (both as separate "
@@ -2190,13 +2215,12 @@ def run(args):
         return None if types else coverage
 
     hs_arg = getattr(args, "hotspot", None)
+    hs_max = getattr(args, "hotspot_max", HOTSPOT_MAX)
 
     def hs_from(counts):
-        """(hotspot cells, threshold) for a count map; threshold adaptive unless --hotspot set."""
-        if not counts:
-            return [], 0
-        thr = hs_arg if hs_arg is not None else max(3, _percentile(sorted(counts.values()),
-                                                                    HOTSPOT_PCTL))
+        """(hotspot cells, threshold) for a count map; threshold adaptive unless --hotspot set,
+        and capped to the ~hs_max densest cells so a saturated map isn't flooded."""
+        thr = hotspot_threshold(counts, hs_arg, HOTSPOT_PCTL, hs_max)
         return (hotspot_cells(counts, thr) if thr and thr > 0 else []), thr
 
     radio = getattr(args, "radio", "wifi") or "wifi"
@@ -2414,7 +2438,7 @@ def _menu_help():
     print(f"  {y}runs{r}           list the sessions in the backup")
     print(f"  {y}run{r} N          just run N              {y}date{r} YYYY-MM-DD   just that date")
     print(_rule(label="tune the grid + track"))
-    print(f"  {y}cell{r} N  grid m   {y}min{r} N  min obs   {y}hole{r} N  hole thresh   {y}hotspot{r} N  (0=off, auto)")
+    print(f"  {y}cell{r} N  grid m   {y}min{r} N  min obs   {y}hole{r} N  hole thresh   {y}hotspot{r} N  (0=off, auto)   {y}hotspotmax{r} N  cap")
     print(f"  {y}radio{r} wifi|bt|all   which radio the hotspots count (default wifi; needs a .sqlite)")
     print(f"  {y}rungap{r} N   session split (min)   {y}trackgap{r} N   path split (min)   {y}trackhop{r} N   max hop (m)")
     print(_rule(label="data + output"))
@@ -2441,7 +2465,8 @@ _MENU_GUIDE = [
         ("cell N", "Grid cell edge in metres (~half a block). Below ~25 m you're just mapping GPS scatter. Default 50."),
         ("min N", "How many networks a cell needs before it counts as 'covered' - filters stray fixes. Default 2."),
         ("hole N", "Of a cell's 8 neighbours, how many must be covered for it to rank as a 'hole' (a street you skipped) vs an 'edge' (the frontier). Higher = stricter, so fewer holes. Default 5."),
-        ("hotspot N", "Density circles on cells with at least N networks. 0 turns them off; 'auto' marks the top ~10% densest, adaptive per dataset (the default)."),
+        ("hotspot N", "Density circles on cells with at least N networks. 0 turns them off; 'auto' marks the top ~10% densest (capped to the densest few dozen so a saturated map isn't flooded), adaptive per dataset (the default)."),
+        ("hotspotmax N", "Cap adaptive hotspots to the N densest cells so a heavily-collected area doesn't fill with circles. Default 50; 0 removes the cap. Ignored when you set an explicit 'hotspot N'."),
         ("radio wifi|bt|all", "Which radio the hotspot circles count: wifi (default), bt (Bluetooth classic + BLE, its own blue layer), or all (both as separate colour-coded layers). Needs a SQLite backup; KML/CSV rows carry no radio type."),
     ]),
     ("track", "runs + track segmentation", [
@@ -2527,7 +2552,8 @@ def _menu_namespace(st, list_runs=False):
         date=st["date"] if st["mode"] == "date" else None,
         pois=st.get("pois", True), poi_source=st.get("poi_source", "overture"),
         overture_confidence=OVERTURE_MIN_CONFIDENCE, overture_release=OVERTURE_RELEASE,
-        hotspot=st.get("hotspot"), radio=st.get("radio", "wifi"),
+        hotspot=st.get("hotspot"), hotspot_max=st.get("hotspot_max", HOTSPOT_MAX),
+        radio=st.get("radio", "wifi"),
         max_pois_per_hole=st.get("max_pois_per_hole", MAX_POIS_PER_HOLE),
         max_pois=st.get("max_pois", MAX_POIS_TOTAL),
         refresh_pois=st.get("refresh_pois", False),
@@ -2541,7 +2567,9 @@ def interactive_menu(args):
           "track_gap": args.track_gap, "track_hop": getattr(args, "track_hop", TRACK_MAX_HOP_M),
           "mode": "all", "run": None, "date": None,
           "pois": getattr(args, "pois", True), "poi_source": getattr(args, "poi_source", "overture"),
-          "hotspot": getattr(args, "hotspot", None), "radio": getattr(args, "radio", "wifi"),
+          "hotspot": getattr(args, "hotspot", None),
+          "hotspot_max": getattr(args, "hotspot_max", HOTSPOT_MAX),
+          "radio": getattr(args, "radio", "wifi"),
           "max_pois": getattr(args, "max_pois", MAX_POIS_TOTAL),
           "max_pois_per_hole": getattr(args, "max_pois_per_hole", MAX_POIS_PER_HOLE),
           "refresh_pois": False, "refresh_overture": False,
@@ -2599,6 +2627,10 @@ def interactive_menu(args):
                     st["hotspot"] = int(arg)
                     lbl = "off" if st["hotspot"] == 0 else str(st["hotspot"])
                 _redraw(st, changed=f"hotspot -> {lbl}")
+            elif cmd == "hotspotmax" and arg:
+                st["hotspot_max"] = int(arg)
+                lbl = "no cap" if st["hotspot_max"] == 0 else f"top {st['hotspot_max']}"
+                _redraw(st, changed=f"hotspot cap -> {lbl}")
             elif cmd == "radio":
                 if arg in RADIO_CHOICES:
                     st["radio"] = arg

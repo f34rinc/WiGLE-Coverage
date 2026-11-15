@@ -608,6 +608,27 @@ class TestHotspots(unittest.TestCase):
         self.assertEqual([h[2] for h in hs], [100, 268])   # only >=50, ascending (biggest on top)
         self.assertNotIn((0, 0), [(h[0], h[1]) for h in hs])
 
+    def test_hotspot_threshold_manual_override_and_empty(self):
+        counts = {(0, 0): 10, (0, 1): 20}
+        self.assertEqual(wc.hotspot_threshold(counts, 5), 5)    # explicit --hotspot N used verbatim
+        self.assertEqual(wc.hotspot_threshold(counts, 0), 0)    # 0 = off, verbatim (no cap applied)
+        self.assertEqual(wc.hotspot_threshold({}, None), 0)     # empty map -> no threshold
+
+    def test_hotspot_threshold_auto_floors_at_3(self):
+        counts = {(0, i): 1 for i in range(10)}                 # sparse: every cell count 1
+        self.assertEqual(wc.hotspot_threshold(counts, None, pctl=90, cap=50), 3)  # floor, cap idle
+
+    def test_hotspot_threshold_cap_limits_to_top_n(self):
+        # 100 cells, counts 1..100. The 90th percentile alone (=91) marks ~10 cells; the
+        # top-N cap raises the threshold so only the N densest qualify (saturated-map fix).
+        counts = {(0, i): i + 1 for i in range(100)}
+        capped = wc.hotspot_threshold(counts, None, pctl=90, cap=5)
+        self.assertEqual(capped, 96)                            # vals[-5]=96 -> cells >=96 are 5
+        self.assertEqual(len(wc.hotspot_cells(counts, capped)), 5)
+        uncapped = wc.hotspot_threshold(counts, None, pctl=90, cap=0)
+        self.assertEqual(uncapped, 91)                          # cap off -> pure percentile
+        self.assertGreater(len(wc.hotspot_cells(counts, uncapped)), 5)
+
     def test_render_embeds_hotspots(self):
         import tempfile
         dlat, dlon = wc.meters_to_deg(50, LAT)
@@ -748,6 +769,10 @@ class TestRadioArg(unittest.TestCase):
     def test_track_hop_defaults_and_parses(self):
         self.assertEqual(self._parse([]).track_hop, wc.TRACK_MAX_HOP_M)   # guard on by default
         self.assertEqual(self._parse(["--track-hop", "200"]).track_hop, 200.0)
+
+    def test_hotspot_max_defaults_and_parses(self):
+        self.assertEqual(self._parse([]).hotspot_max, wc.HOTSPOT_MAX)     # cap on by default
+        self.assertEqual(self._parse(["--hotspot-max", "30"]).hotspot_max, 30)
 
 
 class TestFmtSecs(unittest.TestCase):
@@ -970,10 +995,11 @@ class TestMenuNamespace(unittest.TestCase):
         self.assertEqual(ns.max_pois, wc.MAX_POIS_TOTAL)
         self.assertEqual(ns.max_pois_per_hole, wc.MAX_POIS_PER_HOLE)
         self.assertEqual(ns.track_hop, wc.TRACK_MAX_HOP_M)   # hop guard defaults on
+        self.assertEqual(ns.hotspot_max, wc.HOTSPOT_MAX)     # auto-hotspot cap defaults on
 
     def test_tunables_pass_through(self):
         st = dict(self.BASE, hotspot=25, radio="all", max_pois=0, max_pois_per_hole=6,
-                  run_gap=45, track_gap=8, track_hop=120, refresh_pois=True,
+                  run_gap=45, track_gap=8, track_hop=120, hotspot_max=30, refresh_pois=True,
                   refresh_overture=True, track="run.gpx", out="map.html")
         ns = wc._menu_namespace(st)
         self.assertEqual(ns.hotspot, 25)
@@ -986,6 +1012,7 @@ class TestMenuNamespace(unittest.TestCase):
         self.assertTrue(ns.refresh_overture)
         self.assertEqual(ns.track, "run.gpx")
         self.assertEqual(ns.track_hop, 120)
+        self.assertEqual(ns.hotspot_max, 30)
         self.assertEqual(ns.out, "map.html")
 
 
