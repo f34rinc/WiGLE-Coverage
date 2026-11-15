@@ -101,6 +101,64 @@ class TestTrack(unittest.TestCase):
         # a single isolated fix can't form a line
         self.assertEqual(wc.build_track_segments([(0, 40.4375, -111.9255)], 300000, 0.0), [])
 
+    def test_impossible_speed_jump_breaks_line(self):
+        # a GPS glitch fix ~13 km away, logged 1 s after the previous fix, implies an
+        # impossible ground speed; it must break the line (and drop out as a lone point)
+        # instead of drawing a straight spike across the map (the Copacabana multipath bug).
+        rows = [
+            (0,    -22.9850, -43.1920),
+            (1000, -22.9849, -43.1919),   # ~15 m in 1 s, normal
+            (2000, -22.9848, -43.1918),
+            (3000, -22.8993, -43.2801),   # ~13.6 km in 1 s -> glitch out
+            (4000, -22.9847, -43.1917),   # snaps back, also impossible
+            (5000, -22.9846, -43.1916),
+        ]
+        segs = wc.build_track_segments(rows, gap_ms=300000, min_move_deg=0.0)
+        pts = [pt for seg in segs for pt in seg]
+        self.assertNotIn([-22.8993, -43.2801], pts)   # the glitch fix is not drawn
+        self.assertGreaterEqual(len(segs), 1)          # the real track survives
+        self.assertTrue(all(len(s) >= 2 for s in segs))
+
+    def test_long_straight_hop_breaks_even_at_plausible_speed(self):
+        # a ~1.25 km straight hop between two fixes, logged 3 min apart at a plausible
+        # ~25 km/h, slips under BOTH the time-gap (5 min) and speed (126 km/h) guards.
+        # But a straight line that long can't follow a curving street - it cuts across
+        # blocks and buildings. The hop-distance guard must break the line so that
+        # fabricated chord is never drawn. (Supersedes the old "sparse Uber ride stays
+        # one line" behaviour, which drew exactly those chords across the map.)
+        rows = [
+            (0,      -22.9850, -43.1920),
+            (180000, -22.9950, -43.1850),   # ~1.25 km straight hop -> too long for a street
+            (360000, -23.0050, -43.1780),   # another ~1.25 km hop
+        ]
+        segs = wc.build_track_segments(rows, gap_ms=300000, min_move_deg=0.0)
+        self.assertEqual(segs, [])   # every hop > 150 m -> each point isolated -> nothing drawn
+
+    def test_dense_path_within_hop_limit_stays_connected(self):
+        # a real walked path sampled densely (every hop well under 150 m) must stay ONE
+        # connected line - the hop guard only cuts the long fabricated chords, never the
+        # legit dense paths that make up almost the whole track.
+        rows = [(t * 10000, -22.9850 - t * 0.0005, -43.1920 + t * 0.0005) for t in range(6)]
+        segs = wc.build_track_segments(rows, gap_ms=300000, min_move_deg=0.0)
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(len(segs[0]), 6)   # ~75 m hops, ~7.6 m/s -> no guard trips
+
+    def test_moderate_speed_teleport_breaks(self):
+        # the Copacabana multipath also threw slower teleports: ~6 km over ~2.5 min
+        # (~144 km/h) - impossible for any Rio street or highway, so it must break the
+        # line even though it isn't a sub-second bounce. Guards the speed ceiling from
+        # being set so high that these survive.
+        rows = [
+            (0,      -22.9850, -43.1920),
+            (30000,  -22.9848, -43.1918),   # ~30 m, normal
+            (180000, -22.9310, -43.1920),   # ~6.0 km in 150 s -> ~144 km/h -> glitch
+            (210000, -22.9846, -43.1916),   # snaps back
+            (240000, -22.9844, -43.1914),
+        ]
+        segs = wc.build_track_segments(rows, gap_ms=300000, min_move_deg=0.0)
+        pts = [pt for seg in segs for pt in seg]
+        self.assertNotIn([-22.9310, -43.1920], pts)   # the teleport fix is not drawn
+
 
 class TestSessionize(unittest.TestCase):
     def test_splits_into_runs_on_gap(self):
@@ -669,6 +727,10 @@ class TestRadioArg(unittest.TestCase):
         self.assertEqual(self._parse(["--radio", "bt"]).radio, "bt")
         self.assertEqual(self._parse(["--radio", "all"]).radio, "all")
 
+    def test_track_hop_defaults_and_parses(self):
+        self.assertEqual(self._parse([]).track_hop, wc.TRACK_MAX_HOP_M)   # guard on by default
+        self.assertEqual(self._parse(["--track-hop", "200"]).track_hop, 200.0)
+
 
 class TestFmtSecs(unittest.TestCase):
     def test_formats_elapsed(self):
@@ -889,11 +951,12 @@ class TestMenuNamespace(unittest.TestCase):
         self.assertFalse(ns.refresh_overture)
         self.assertEqual(ns.max_pois, wc.MAX_POIS_TOTAL)
         self.assertEqual(ns.max_pois_per_hole, wc.MAX_POIS_PER_HOLE)
+        self.assertEqual(ns.track_hop, wc.TRACK_MAX_HOP_M)   # hop guard defaults on
 
     def test_tunables_pass_through(self):
         st = dict(self.BASE, hotspot=25, radio="all", max_pois=0, max_pois_per_hole=6,
-                  run_gap=45, track_gap=8, refresh_pois=True, refresh_overture=True,
-                  track="run.gpx", out="map.html")
+                  run_gap=45, track_gap=8, track_hop=120, refresh_pois=True,
+                  refresh_overture=True, track="run.gpx", out="map.html")
         ns = wc._menu_namespace(st)
         self.assertEqual(ns.hotspot, 25)
         self.assertEqual(ns.radio, "all")
@@ -904,6 +967,7 @@ class TestMenuNamespace(unittest.TestCase):
         self.assertTrue(ns.refresh_pois)
         self.assertTrue(ns.refresh_overture)
         self.assertEqual(ns.track, "run.gpx")
+        self.assertEqual(ns.track_hop, 120)
         self.assertEqual(ns.out, "map.html")
 
 

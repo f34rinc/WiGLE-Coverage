@@ -106,6 +106,15 @@ RADIO_TYPES   = {"wifi": ("W",), "bt": ("B", "E")}   # "all" -> None (no type fi
 KISMET_RADIO_PHYS = {"wifi": ("IEEE802.11",), "bt": ("Bluetooth", "BTLE")}
 TRACK_GAP_MIN  = 5      # minutes; a larger gap between fixes starts a new track segment
 TRACK_MIN_MOVE_M = 5    # drop track fixes closer than this to the last kept one (jitter)
+TRACK_MAX_SPEED_MS = 35.0  # m/s (~126 km/h); above any speed a Rio passenger sustains on a
+                           # street or highway, but below the GPS-multipath teleports in the
+                           # data -> a jump faster than this is a glitch, so break the line
+                           # instead of drawing a straight spike across the map
+TRACK_MAX_HOP_M = 150   # metres; a single straight hop longer than this between two kept
+                        # fixes can't be following a real (curving) street - it cuts across
+                        # blocks/buildings, so break the line there instead of drawing the
+                        # chord. Time-independent, unlike the speed guard, so it also catches
+                        # slow-but-long sparse-GPS legs and is immune to merged-DB clock skew.
 RUN_GAP_MIN    = 30     # minutes of quiet that separates one run/session from the next
 EARTH_M_PER_DEG = 111320.0
 # Overpass (OpenStreetMap) - names businesses/POIs inside the "hole" cells; the FALLBACK source
@@ -645,19 +654,51 @@ def hotspot_cells(counts, threshold):
     return hs
 
 
-def build_track_segments(rows, gap_ms, min_move_deg):
-    """Split time-sorted (time, lat, lon) fixes into polyline segments: break on a
-    time gap (so separate walks don't join with a straight line) and drop fixes that
-    barely moved (GPS jitter). Returns [[[lat,lon],...], ...]."""
-    segs, cur, last_t, last = [], [], None, None
+def _track_dist_m(a, b):
+    """Fast local flat-earth distance in metres between (lat, lon) points a and b -
+    accurate to a fraction of a percent over track scales, which is all the speed guard
+    in build_track_segments needs (and far cheaper than haversine over millions of fixes)."""
+    mlat = math.radians((a[0] + b[0]) / 2.0)
+    dx = (b[1] - a[1]) * EARTH_M_PER_DEG * math.cos(mlat)
+    dy = (b[0] - a[0]) * EARTH_M_PER_DEG
+    return math.hypot(dx, dy)
+
+
+def build_track_segments(rows, gap_ms, min_move_deg, max_speed_ms=TRACK_MAX_SPEED_MS,
+                         max_hop_m=TRACK_MAX_HOP_M):
+    """Split time-sorted (time, lat, lon) fixes into polyline segments. Break the line on
+    any of:
+      - a time gap (so separate walks don't join with a straight line);
+      - a physically impossible speed between consecutive kept fixes - a GPS glitch
+        (urban-canyon multipath) that would draw a straight spike across the map; or
+      - a single straight hop longer than max_hop_m, which can't be following a real
+        (curving) street and so is a fabricated chord across blocks - this also catches
+        slow-but-long sparse-GPS legs that stay under the speed ceiling, and needs no
+        timestamps (robust to a merged DB's clock skew).
+    Fixes that barely moved (GPS jitter) are dropped. A lone fix left between two breaks
+    falls out (a segment needs >=2 points). Pass max_speed_ms=0 or max_hop_m=0 to disable
+    that guard. Returns [[[lat,lon],...], ...]."""
+    segs, cur, last_t, last, last_kept_t = [], [], None, None, None
     for (t, la, lo) in rows:
-        if last_t is not None and t - last_t > gap_ms:
+        gap = last_t is not None and t - last_t > gap_ms
+        jump = hop = False
+        if not gap and last is not None:
+            d = _track_dist_m(last, (la, lo))
+            if max_speed_ms and last_kept_t is not None:
+                dt_s = (t - last_kept_t) / 1000.0
+                dt_eff = dt_s if dt_s > 0 else 1.0   # same/earlier timestamp -> treat as <=1 s
+                if d / dt_eff > max_speed_ms:
+                    jump = True
+            if max_hop_m and d > max_hop_m:
+                hop = True
+        if gap or jump or hop:
             if len(cur) >= 2:
                 segs.append(cur)
-            cur, last = [], None
+            cur, last, last_kept_t = [], None, None
         if last is None or abs(la - last[0]) >= min_move_deg or abs(lo - last[1]) >= min_move_deg:
             cur.append([la, lo])
             last = (la, lo)
+            last_kept_t = t
         last_t = t
     if len(cur) >= 2:
         segs.append(cur)
@@ -1889,6 +1930,10 @@ def parse_args():
                         "colour-coded layers). Needs a SQLite backup; no-op on KML/CSV.")
     g.add_argument("--track-gap", type=float, default=TRACK_GAP_MIN, metavar="MIN",
                    help=f"minutes that break the path into segments (default {TRACK_GAP_MIN})")
+    g.add_argument("--track-hop", type=float, default=TRACK_MAX_HOP_M, metavar="M",
+                   help=f"metres: a single straight hop longer than this can't follow a real "
+                        f"street, so break the line there instead of drawing a chord across "
+                        f"blocks (default {TRACK_MAX_HOP_M:.0f}; 0 = off)")
 
     g = p.add_argument_group("interface + output")
     g.add_argument("-i", "--menu", action="store_true", help="interactive menu instead of flags")
@@ -2165,7 +2210,8 @@ def run(args):
         track_segs = parse_gpx_track(gpx_track)
     elif track_fixes:
         track_segs = build_track_segments(
-            track_fixes, args.track_gap * 60_000, TRACK_MIN_MOVE_M / EARTH_M_PER_DEG)
+            track_fixes, args.track_gap * 60_000, TRACK_MIN_MOVE_M / EARTH_M_PER_DEG,
+            max_hop_m=getattr(args, "track_hop", TRACK_MAX_HOP_M))
 
     poi_by_hole, more_by_hole = {}, {}
     poi_attrib = POI_ATTRIB["osm"]
@@ -2359,7 +2405,7 @@ def _menu_help():
     print(_rule(label="tune the grid + track"))
     print(f"  {y}cell{r} N  grid m   {y}min{r} N  min obs   {y}hole{r} N  hole thresh   {y}hotspot{r} N  (0=off, auto)")
     print(f"  {y}radio{r} wifi|bt|all   which radio the hotspots count (default wifi; needs a .sqlite)")
-    print(f"  {y}rungap{r} N       session split (min)     {y}trackgap{r} N   path split (min)")
+    print(f"  {y}rungap{r} N   session split (min)   {y}trackgap{r} N   path split (min)   {y}trackhop{r} N   max hop (m)")
     print(_rule(label="data + output"))
     print(f"  {y}data{r} <path>    read a different folder")
     print(f"  {y}track{r} <path>   add a track (.gpx/.sqlite)   {y}out{r} <path>   output file")
@@ -2390,6 +2436,7 @@ _MENU_GUIDE = [
     ("track", "runs + track segmentation", [
         ("rungap N", "Minutes of gap between fixes that starts a new run, for the run/date views. Default 30."),
         ("trackgap N", "Minutes between GPS fixes that break the drawn path into a new segment, so separate walks don't join with a straight line. Default 5."),
+        ("trackhop N", "Metres: a single straight hop longer than this can't be following a real (curving) street, so the line breaks there instead of drawing a chord across blocks and buildings. Catches slow sparse-GPS legs the speed guard misses. Default 150; 0 turns it off."),
     ]),
     ("io", "data + output", [
         ("data <path>", "Folder to read (KML/CSV exports plus .sqlite backups). Default ./data."),
@@ -2463,7 +2510,8 @@ def _menu_namespace(st, list_runs=False):
     return argparse.Namespace(
         paths=[st["data"]], track=st.get("track"), data=None,
         cell_size=st["cell_size"], min_obs=st["min_obs"], hole_threshold=st["hole_threshold"],
-        run_gap=st["run_gap"], track_gap=st["track_gap"], list_runs=list_runs,
+        run_gap=st["run_gap"], track_gap=st["track_gap"],
+        track_hop=st.get("track_hop", TRACK_MAX_HOP_M), list_runs=list_runs,
         run=st["run"] if st["mode"] == "run" else None,
         date=st["date"] if st["mode"] == "date" else None,
         pois=st.get("pois", True), poi_source=st.get("poi_source", "overture"),
@@ -2479,7 +2527,8 @@ def _menu_namespace(st, list_runs=False):
 def interactive_menu(args):
     st = {"data": args.data or DATA_DIR, "cell_size": args.cell_size, "min_obs": args.min_obs,
           "hole_threshold": args.hole_threshold, "run_gap": args.run_gap,
-          "track_gap": args.track_gap, "mode": "all", "run": None, "date": None,
+          "track_gap": args.track_gap, "track_hop": getattr(args, "track_hop", TRACK_MAX_HOP_M),
+          "mode": "all", "run": None, "date": None,
           "pois": getattr(args, "pois", True), "poi_source": getattr(args, "poi_source", "overture"),
           "hotspot": getattr(args, "hotspot", None), "radio": getattr(args, "radio", "wifi"),
           "max_pois": getattr(args, "max_pois", MAX_POIS_TOTAL),
@@ -2557,6 +2606,10 @@ def interactive_menu(args):
             elif cmd == "trackgap" and arg:
                 st["track_gap"] = int(arg)
                 _redraw(st, changed=f"track-gap -> {st['track_gap']} min")
+            elif cmd == "trackhop" and arg:
+                st["track_hop"] = float(arg)
+                lbl = "off" if st["track_hop"] == 0 else f"{st['track_hop']:.0f} m"
+                _redraw(st, changed=f"track-hop -> {lbl}")
             elif cmd in ("track", "gpx"):
                 st["track"] = arg or None
                 _redraw(st, changed=(f"track -> {os.path.basename(arg)}" if arg else "track cleared"))
