@@ -192,9 +192,11 @@ The full flag list (grouped as `python wigle_coverage.py --help` prints them):
 | `--cell-size M` | 50 | grid cell edge, metres (~half a block; below ~25 m just maps GPS scatter) |
 | `--min-obs N` | 2 | networks in a cell before it counts as "covered" (filters stray fixes) |
 | `--hole-threshold N` | 5 | covered neighbours (of 8) for a "hole" vs an "edge" |
-| `--hotspot N` | adaptive | circles on cells with ≥ N networks (default: top 10%; 0 = off) |
+| `--hotspot N` | adaptive | circles on cells with ≥ N networks (default: top 10%, capped to the densest ~50; 0 = off) |
+| `--hotspot-max N` | 50 | cap adaptive hotspots to the N densest cells so a saturated map isn't flooded (0 = no cap; ignored when `--hotspot` is set) |
 | `--radio R` | `wifi` | which radio the hotspots count: `wifi`, `bt` (classic + BLE), or `all` (both, separate colour-coded layers). SQLite only |
 | `--track-gap MIN` | 5 | minutes between GPS fixes that starts a new path segment |
+| `--track-hop M` | 150 | metres: break the path where a single straight hop exceeds this — drops fabricated chords that cut straight across blocks (0 = off) |
 
 **Interface + output**
 
@@ -226,7 +228,7 @@ Raise `--hole-threshold` → stricter, so fewer cells count as holes (more becom
 WiGLE-style circles — sized by how many **distinct networks** were captured there (counted once per BSSID, so an AP that shows up in several unioned exports doesn't inflate the count), with the count
 labeled on each (click for the exact number). It counts *actual APs* — from the KML/CSV
 directly, or from the SQLite backup's `network` table (not the GPS track). In a `--run` / `--date` view it instead counts the distinct networks *observed on that walk* (from the backup's `location` table, within the run's time window), so the hotspots match that run's coverage rather than your whole history — the two views' numbers won't line up 1:1, which is expected. By default it
-shows your **top ~10% densest cells** (adaptive per dataset); `--hotspot N` sets an absolute
+shows your **top ~10% densest cells** (adaptive per dataset), **capped to the ~50 densest** so a heavily-collected area isn't buried under hundreds of circles — change that cap with `--hotspot-max N` (menu `hotspotmax N`; `0` removes it). `--hotspot N` sets an absolute
 threshold (only cells with ≥ N networks), and `--hotspot 0` turns it off.
 
 By default hotspots count **WiFi only** (WiGLE type `W`). `--radio bt` counts Bluetooth instead (classic + BLE) as its own **blue** layer, and `--radio all` draws **both** — WiFi in the warm red ramp, Bluetooth in blue — as separate, independently toggleable layers, each with its own adaptive threshold. Bluetooth density runs much higher than WiFi because BLE devices with rotating random MACs each read as a distinct network, so keeping it on a separate layer (and off by default) stops it from swamping the WiFi coverage picture. The radio filter reads the `network.type` column, so it needs a **SQLite backup**; KML/CSV rows carry no type and stay a single combined layer.
@@ -280,6 +282,16 @@ The keyless Esri basemaps work out of the box. If you want a clean OSM-based
 
 An **"OSM smooth (Stadia)"** option then appears in the layer switcher (and becomes the
 default). **No key → the option simply isn't shown.**
+
+### Fast even with a big dataset
+
+A whole-history backup can put **tens of thousands of shapes** on one map — coverage cells,
+holes, edges, hotspots and the walked track. The map draws them on an **HTML5 canvas**
+(Leaflet's `preferCanvas`) instead of one SVG node per shape, so panning and zooming stay smooth
+even on a saturated dataset. The heavy layers are also **individually toggleable** in the
+top-right switcher — **Coverage**, **Holes** and **Edges** each show their count and can be
+switched off (the frontier **Edges** layer is usually the densest), alongside **Your track** and
+the **Hotspots** layers — so you can strip the map down to just what you're working on.
 
 ### Self-contained map (no CDN)
 
